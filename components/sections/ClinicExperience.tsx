@@ -127,10 +127,14 @@ export function ClinicExperience() {
                 key={item.number}
                 className="relative aspect-[3/4] h-[58svh] w-[80vw] shrink-0 snap-center overflow-hidden rounded-2xl sm:w-[62vw] md:aspect-[4/5] lg:aspect-[3/4] lg:h-[64svh] lg:w-[40vw] xl:w-[34vw]"
               >
-                <div
-                  className="ce-img absolute inset-0 scale-[1.02] bg-cover bg-center"
-                  style={{ backgroundImage: `url(${item.image})` }}
-                >
+                <div className="absolute inset-0">
+                  <img
+                    src={item.image}
+                    alt={item.label}
+                    loading="lazy"
+                    decoding="async"
+                    className="ce-img h-full w-full object-cover scale-[1.02]"
+                  />
                   <div className="absolute -left-1/4 -top-1/4 h-2/3 w-2/3 rounded-full bg-white/25 blur-3xl" />
                   <div className="absolute inset-0 bg-gradient-to-t from-ink/45 via-transparent to-transparent" />
                   <Grain opacity={0.09} />

@@ -152,10 +152,14 @@ export function BeforeAfter() {
             className="relative aspect-[4/3] w-full touch-pan-y select-none overflow-hidden rounded-2xl shadow-[0_40px_80px_-40px_rgba(16,24,32,0.5)] sm:aspect-[16/10] lg:aspect-[2/1]"
           >
             {/* AFTER (base layer) */}
-            <div
-              className="absolute inset-0 bg-cover bg-center"
-              style={{ backgroundImage: `url(${active.after})` }}
-            >
+            <div className="absolute inset-0">
+              <img
+                src={active.after}
+                alt={`${active.treatment} After`}
+                loading="lazy"
+                decoding="async"
+                className="h-full w-full object-cover"
+              />
               <div className="absolute right-[12%] top-[18%] h-1/2 w-1/2 rounded-full bg-white/30 blur-3xl" />
               <Sparkles
                 className="absolute right-[10%] top-[16%] h-8 w-8 text-gold/70"
@@ -171,12 +175,16 @@ export function BeforeAfter() {
             {/* BEFORE (clipped layer) */}
             <div
               ref={beforeRef}
-              className="absolute inset-0 bg-cover bg-center"
-              style={{
-                backgroundImage: `url(${active.before})`,
-                clipPath: "inset(0 50% 0 0)",
-              }}
+              className="absolute inset-0"
+              style={{ clipPath: "inset(0 50% 0 0)" }}
             >
+              <img
+                src={active.before}
+                alt={`${active.treatment} Before`}
+                loading="lazy"
+                decoding="async"
+                className="h-full w-full object-cover"
+              />
               <div className="absolute inset-0 bg-ink/10" />
               <Grain opacity={0.12} />
               <span className="absolute left-5 top-5 rounded-full bg-ink/25 px-3 py-1.5 text-[0.6rem] font-medium uppercase tracking-[0.22em] text-cream/90 backdrop-blur-sm">

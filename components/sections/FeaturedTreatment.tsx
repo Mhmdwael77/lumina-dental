@@ -94,12 +94,14 @@ export function FeaturedTreatment() {
         {/* Image */}
         <div className="order-1 lg:order-2">
           <div className="ft-frame relative aspect-[4/5] w-full overflow-hidden rounded-2xl sm:aspect-[3/4] lg:aspect-[4/5]">
-            <div
-              className="ft-image absolute inset-0 scale-[1.12] bg-cover bg-center"
-              style={{
-                backgroundImage: "url('/images/featured_makeover.webp')",
-              }}
-            >
+            <div className="absolute inset-0">
+              <img
+                src="/images/featured_makeover.webp"
+                alt="Smile Makeover Signature Service"
+                loading="lazy"
+                decoding="async"
+                className="ft-image h-full w-full object-cover scale-[1.12]"
+              />
               {/* soft studio highlight */}
               <div className="absolute -left-1/4 -top-1/4 h-2/3 w-2/3 rounded-full bg-white/40 blur-3xl" />
               {/* depth vignette */}

@@ -136,10 +136,14 @@ export function Treatments() {
             style={{ width: PREVIEW_W, height: PREVIEW_H }}
           >
             {active !== null && (
-              <div
-                className="relative h-full w-full bg-cover bg-center"
-                style={{ backgroundImage: `url(${TREATMENT_PREVIEWS[active]})` }}
-              >
+              <div className="relative h-full w-full">
+                <img
+                  src={TREATMENT_PREVIEWS[active]}
+                  alt={TREATMENTS[active].title}
+                  loading="lazy"
+                  decoding="async"
+                  className="h-full w-full object-cover"
+                />
                 <div className="absolute inset-0 bg-gradient-to-t from-ink/70 via-ink/20 to-transparent" />
                 <span className="absolute left-5 top-3 font-serif text-6xl leading-none text-white/30">
                   {TREATMENTS[active].number}
@@ -205,10 +209,15 @@ export function Treatments() {
                     <p className="max-w-md text-sm leading-relaxed text-ink/60">
                       {t.description}
                     </p>
-                    <div
-                      className="mt-5 h-36 w-full rounded-lg bg-cover bg-center"
-                      style={{ backgroundImage: `url(${TREATMENT_PREVIEWS[i]})` }}
-                    />
+                    <div className="relative mt-5 h-36 w-full overflow-hidden rounded-lg">
+                      <img
+                        src={TREATMENT_PREVIEWS[i]}
+                        alt={t.title}
+                        loading="lazy"
+                        decoding="async"
+                        className="h-full w-full object-cover"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
