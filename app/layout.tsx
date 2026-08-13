@@ -89,6 +89,19 @@ const jsonLd = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${playfair.variable} ${inter.variable}`}>
+      <head>
+        {/*
+         * Preload critical 3D model and above-the-fold image assets
+         */}
+        <link
+          rel="preload"
+          as="fetch"
+          href="/models/tooth.glb"
+          crossOrigin="anonymous"
+        />
+        <link rel="preload" as="image" href="/images/doctor.webp" />
+        <link rel="preload" as="image" href="/images/featured_makeover.webp" />
+      </head>
       {/* suppressHydrationWarning: browser extensions (e.g. Grammarly) inject
           attributes onto <body> before hydration — this only silences that
           body-level attribute mismatch, not real mismatches in the tree. */}

@@ -119,22 +119,21 @@ export const DOCTOR = {
   name: "Dr. Ahmed Hassan",
   role: "Cosmetic & Implant Dentist",
   monogram: "AH",
-  image: null as string | null,
+  image: "/images/doctor.webp",
   credentials: ["DDS", "MSc", "15+ Years Experience", "10,000+ Patients"] as const,
   quote:
     "My goal is to make every patient feel informed, comfortable, and confident.",
 };
 
 /**
- * Clinic gallery panels. `image` gradients are art-directed placeholders —
- * replace with real photography (set an image path) when available.
+ * Clinic gallery panels with high-resolution WebP photography.
  */
 export const CLINIC_IMAGES = [
-  { number: "01", label: "Reception", image: "linear-gradient(145deg, #efe7d6 0%, #cabfa6 100%)" },
-  { number: "02", label: "Treatment Room", image: "linear-gradient(145deg, #d7d4cb 0%, #969c9d 100%)" },
-  { number: "03", label: "Waiting Area", image: "linear-gradient(145deg, #e8ddc6 0%, #b99a6b 100%)" },
-  { number: "04", label: "Equipment", image: "linear-gradient(145deg, #c2c7c9 0%, #38434e 100%)" },
-  { number: "05", label: "Interior", image: "linear-gradient(145deg, #ece4d4 0%, #a89e8a 100%)" },
+  { number: "01", label: "Reception", image: "/images/reception.webp" },
+  { number: "02", label: "Treatment Room", image: "/images/treatment.webp" },
+  { number: "03", label: "Waiting Area", image: "/images/waiting.webp" },
+  { number: "04", label: "Equipment", image: "/images/equipment.webp" },
+  { number: "05", label: "Interior", image: "/images/interior.webp" },
 ] as const;
 
 /** Aggregate review summary (demo). */
@@ -320,26 +319,23 @@ export const BEFORE_AFTER_CASES = [
     treatment: "Porcelain Veneers",
     description:
       "Hand-crafted veneers that refine shape and shade for a flawless, natural finish.",
-    before: "linear-gradient(150deg, #c9bda4 0%, #8d7e66 100%)",
-    after:
-      "radial-gradient(120% 120% at 50% 12%, #fdfbf6 0%, #efe6d4 58%, #ddceb4 100%)",
+    before: "/images/veneers_before.webp",
+    after: "/images/veneers_after.webp",
   },
   {
     id: "makeover",
     treatment: "Smile Makeover",
     description:
       "A complete transformation balancing proportion, alignment and colour.",
-    before: "linear-gradient(150deg, #c4b499 0%, #857657 100%)",
-    after:
-      "radial-gradient(120% 120% at 50% 12%, #fffdf8 0%, #f0e8d8 58%, #dccdb2 100%)",
+    before: "/images/makeover_before.webp",
+    after: "/images/makeover_after.webp",
   },
   {
     id: "whitening",
     treatment: "Teeth Whitening",
     description:
       "Professional whitening that lifts years of staining in a single visit.",
-    before: "linear-gradient(150deg, #cabd9b 0%, #928253 100%)",
-    after:
-      "radial-gradient(120% 120% at 50% 12%, #ffffff 0%, #f3ecdd 58%, #e6d9c2 100%)",
+    before: "/images/whitening_before.webp",
+    after: "/images/whitening_after.webp",
   },
 ] as const;

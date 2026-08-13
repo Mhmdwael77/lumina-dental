@@ -1,22 +1,19 @@
 "use client";
 
 import { useRef, useState } from "react";
-import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
+import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { ArrowUpRight, Plus } from "lucide-react";
 import { TREATMENTS } from "@/lib/constants";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
 
-gsap.registerPlugin(ScrollTrigger);
-
-// On-brand duotone previews (placeholders for real treatment photography).
-const GRADIENTS = [
-  "linear-gradient(135deg,#d8c7a6,#a98c5f)",
-  "linear-gradient(135deg,#3a4650,#101820)",
-  "linear-gradient(135deg,#eee7d8,#c3ad86)",
-  "linear-gradient(135deg,#c9b489,#8f7a52)",
-  "linear-gradient(135deg,#aab1b0,#3a4650)",
-  "linear-gradient(135deg,#e0d3bf,#b99a6b)",
+// High resolution photography preview images for each treatment.
+const TREATMENT_PREVIEWS = [
+  "/images/featured_makeover.webp", // 01 Cosmetic Dentistry
+  "/images/equipment.webp",         // 02 Dental Implants
+  "/images/whitening_after.webp",    // 03 Teeth Whitening
+  "/images/makeover_after.webp",     // 04 Orthodontics
+  "/images/treatment.webp",          // 05 General Dentistry
+  "/images/interior.webp",           // 06 Pediatric Dentistry
 ];
 
 const PREVIEW_W = 300;
@@ -140,15 +137,14 @@ export function Treatments() {
           >
             {active !== null && (
               <div
-                className="relative h-full w-full"
-                style={{ backgroundImage: GRADIENTS[active] }}
+                className="relative h-full w-full bg-cover bg-center"
+                style={{ backgroundImage: `url(${TREATMENT_PREVIEWS[active]})` }}
               >
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_28%_22%,rgba(255,255,255,0.4),transparent_60%)]" />
-                <div className="absolute inset-0 bg-gradient-to-t from-ink/50 to-transparent" />
-                <span className="absolute left-5 top-3 font-serif text-6xl leading-none text-white/20">
+                <div className="absolute inset-0 bg-gradient-to-t from-ink/70 via-ink/20 to-transparent" />
+                <span className="absolute left-5 top-3 font-serif text-6xl leading-none text-white/30">
                   {TREATMENTS[active].number}
                 </span>
-                <span className="absolute bottom-4 left-5 text-xs font-medium uppercase tracking-[0.22em] text-white/90">
+                <span className="absolute bottom-4 left-5 text-xs font-medium uppercase tracking-[0.22em] text-white">
                   {TREATMENTS[active].title}
                 </span>
               </div>
@@ -210,8 +206,8 @@ export function Treatments() {
                       {t.description}
                     </p>
                     <div
-                      className="mt-5 h-36 w-full rounded-lg"
-                      style={{ backgroundImage: GRADIENTS[i] }}
+                      className="mt-5 h-36 w-full rounded-lg bg-cover bg-center"
+                      style={{ backgroundImage: `url(${TREATMENT_PREVIEWS[i]})` }}
                     />
                   </div>
                 </div>

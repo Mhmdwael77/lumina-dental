@@ -1,13 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
+import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { ArrowRight, Check } from "lucide-react";
 import { TIME_OPTIONS, TREATMENT_OPTIONS } from "@/lib/constants";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
-
-gsap.registerPlugin(ScrollTrigger);
 
 type Fields = {
   fullName: string;

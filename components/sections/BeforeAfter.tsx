@@ -1,14 +1,11 @@
 "use client";
 
 import { useRef, useState } from "react";
-import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
+import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { ChevronsLeftRight, Sparkles } from "lucide-react";
 import { Grain } from "@/components/ui/Grain";
 import { BEFORE_AFTER_CASES } from "@/lib/constants";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
-
-gsap.registerPlugin(ScrollTrigger);
 
 export function BeforeAfter() {
   const sectionRef = useRef<HTMLElement>(null);
@@ -156,10 +153,10 @@ export function BeforeAfter() {
           >
             {/* AFTER (base layer) */}
             <div
-              className="absolute inset-0"
-              style={{ backgroundImage: active.after }}
+              className="absolute inset-0 bg-cover bg-center"
+              style={{ backgroundImage: `url(${active.after})` }}
             >
-              <div className="absolute right-[12%] top-[18%] h-1/2 w-1/2 rounded-full bg-white/50 blur-3xl" />
+              <div className="absolute right-[12%] top-[18%] h-1/2 w-1/2 rounded-full bg-white/30 blur-3xl" />
               <Sparkles
                 className="absolute right-[10%] top-[16%] h-8 w-8 text-gold/70"
                 strokeWidth={1}
@@ -174,9 +171,9 @@ export function BeforeAfter() {
             {/* BEFORE (clipped layer) */}
             <div
               ref={beforeRef}
-              className="absolute inset-0"
+              className="absolute inset-0 bg-cover bg-center"
               style={{
-                backgroundImage: active.before,
+                backgroundImage: `url(${active.before})`,
                 clipPath: "inset(0 50% 0 0)",
               }}
             >

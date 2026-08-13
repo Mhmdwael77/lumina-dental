@@ -1,12 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
-import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
+import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { PRINCIPLES } from "@/lib/constants";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
-
-gsap.registerPlugin(ScrollTrigger);
 
 export function WhyChooseUs() {
   const sectionRef = useRef<HTMLElement>(null);

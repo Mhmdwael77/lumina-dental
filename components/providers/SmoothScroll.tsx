@@ -2,10 +2,7 @@
 
 import { useEffect, type ReactNode } from "react";
 import Lenis from "lenis";
-import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
-
-gsap.registerPlugin(ScrollTrigger);
+import gsap, { ScrollTrigger } from "@/lib/gsap";
 
 /**
  * Smooth scrolling (Lenis) wired to GSAP's ticker + ScrollTrigger so there is a

@@ -1,13 +1,10 @@
 "use client";
 
 import { useRef } from "react";
-import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
+import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { Portrait } from "@/components/ui/Portrait";
 import { DOCTOR } from "@/lib/constants";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
-
-gsap.registerPlugin(ScrollTrigger);
 
 export function Doctor() {
   const sectionRef = useRef<HTMLElement>(null);

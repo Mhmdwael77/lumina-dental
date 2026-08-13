@@ -1,13 +1,10 @@
 "use client";
 
 import { useRef, useState } from "react";
-import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
+import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { Check } from "lucide-react";
 import { JOURNEY_STEPS } from "@/lib/constants";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
-
-gsap.registerPlugin(ScrollTrigger);
 
 export function PatientJourney() {
   const sectionRef = useRef<HTMLElement>(null);

@@ -1,13 +1,10 @@
 "use client";
 
 import { useRef } from "react";
-import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
+import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { ArrowRight } from "lucide-react";
 import { Grain } from "@/components/ui/Grain";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
-
-gsap.registerPlugin(ScrollTrigger);
 
 export function FeaturedTreatment() {
   const sectionRef = useRef<HTMLElement>(null);
@@ -98,10 +95,9 @@ export function FeaturedTreatment() {
         <div className="order-1 lg:order-2">
           <div className="ft-frame relative aspect-[4/5] w-full overflow-hidden rounded-2xl sm:aspect-[3/4] lg:aspect-[4/5]">
             <div
-              className="ft-image absolute inset-0 scale-[1.12]"
+              className="ft-image absolute inset-0 scale-[1.12] bg-cover bg-center"
               style={{
-                backgroundImage:
-                  "radial-gradient(120% 100% at 28% 18%, #f6efe2 0%, #e6d5ba 45%, #b99a6b 115%)",
+                backgroundImage: "url('/images/featured_makeover.webp')",
               }}
             >
               {/* soft studio highlight */}

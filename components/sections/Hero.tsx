@@ -2,12 +2,9 @@
 
 import { useEffect, useLayoutEffect, useRef } from "react";
 import dynamic from "next/dynamic";
-import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
+import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { ArrowDown, ArrowUpRight, Star } from "lucide-react";
 import { HERO_PIN_END } from "@/lib/animations";
-
-gsap.registerPlugin(ScrollTrigger);
 
 // The 3D scene is browser-only (WebGL) — load it client-side.
 const ToothScene = dynamic(

@@ -103,7 +103,7 @@ export function ToothScene({
     <div ref={wrapRef} className="absolute inset-0">
       <Canvas
         frameloop={frameloop}
-        dpr={[1, 2]}
+        dpr={[1, 1.5]}
         camera={{ position: [0, 0.1, 7.2], fov: 22 }}
         gl={{
           antialias: true,
