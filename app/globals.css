@@ -1,26 +1,150 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ==========================================================================
+   LUMINA DENTAL — Design System
+   Premium · Minimal · Editorial · Cinematic
+   ========================================================================== */
+
+/* Brand palette — a plain @theme block emits real :root custom properties
+   AND generates the color utilities (bg-cream, text-ink, text-gold, …). */
+@theme {
+  --color-cream: #f4f1eb; /* primary background */
+  --color-ink: #101820; /* primary dark */
+  --color-white: #ffffff;
+  --color-beige: #e8e2d8; /* muted beige */
+  --color-gold: #b99a6b; /* accent — use sparingly */
+  --color-muted: #6b7280; /* muted text */
 }
 
+/* Fonts — inline so the utilities resolve to the next/font variables.
+   next/font emits --font-inter / --font-playfair on <html>. */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-playfair), ui-serif, Georgia, serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+:root {
+  --background: var(--color-cream);
+  --foreground: var(--color-ink);
+}
+
+/* --------------------------------------------------------------------------
+   Base resets & smooth visual defaults
+   Kept inside @layer base so Tailwind utilities always win over these
+   element-level defaults (e.g. `text-cream` beats `a { color: inherit }`).
+   -------------------------------------------------------------------------- */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  * {
+    margin: 0;
+  }
+
+  html {
+    /* Lenis drives smooth scrolling — do NOT force scroll-behavior here */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  /* Lenis smooth-scroll runtime classes */
+  html.lenis,
+  html.lenis body {
+    height: auto;
+  }
+  .lenis.lenis-smooth {
+    scroll-behavior: auto !important;
+  }
+  .lenis.lenis-smooth [data-lenis-prevent] {
+    overscroll-behavior: contain;
+  }
+  .lenis.lenis-stopped {
+    overflow: hidden;
+  }
+  .lenis.lenis-smooth iframe {
+    pointer-events: none;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+    font-size: 1rem;
+    line-height: 1.6;
+    font-synthesis-weight: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Editorial serif headings */
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-playfair), ui-serif, Georgia, serif;
+    font-weight: 500;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    color: var(--color-ink);
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  img,
+  picture,
+  video,
+  canvas,
+  svg {
+    display: block;
+    max-width: 100%;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  /* Selection & focus */
+  ::selection {
+    background-color: var(--color-gold);
+    color: var(--color-white);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-gold);
+    outline-offset: 3px;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Testimonial change reveal */
+@keyframes testi-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Motion preferences
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
