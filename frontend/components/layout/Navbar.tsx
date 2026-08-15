@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import Link from "next/link";
 import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { NAV_LINKS } from "@/lib/constants";
 
@@ -76,12 +77,12 @@ export function Navbar() {
         </ul>
 
         {/* CTA */}
-        <a
-          href="#booking"
+        <Link
+          href="/booking"
           className="whitespace-nowrap rounded-full bg-ink px-4 py-2.5 text-[0.62rem] font-medium uppercase tracking-[0.14em] text-cream transition-all duration-300 hover:bg-ink/85 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold sm:px-6 sm:py-3 sm:text-[0.7rem] sm:tracking-[0.2em]"
         >
           Book Appointment
-        </a>
+        </Link>
       </nav>
     </header>
   );

@@ -10,7 +10,6 @@ import { WhyChooseUs } from "@/components/sections/WhyChooseUs";
 import { ClinicExperience } from "@/components/sections/ClinicExperience";
 import { Testimonials } from "@/components/sections/Testimonials";
 import { PatientJourney } from "@/components/sections/PatientJourney";
-import { Booking } from "@/components/sections/Booking";
 import { EmergencyCTA } from "@/components/sections/EmergencyCTA";
 import { Contact } from "@/components/sections/Contact";
 import { FAQ } from "@/components/sections/FAQ";
@@ -33,7 +32,6 @@ export default function Home() {
         <ClinicExperience />
         <Testimonials />
         <PatientJourney />
-        <Booking />
         <EmergencyCTA />
         <Contact />
         <FAQ />

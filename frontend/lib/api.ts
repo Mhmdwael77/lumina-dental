@@ -6,6 +6,9 @@
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export type BookingStatus = "pending" | "confirmed" | "completed" | "cancelled";
+export type PaymentMethod = "clinic" | "online";
+export type PaymentStatus = "pending" | "paid" | "failed";
+export type ReminderStatus = "pending" | "sent" | "failed" | "not_applicable";
 
 export interface Booking {
   id: number;
@@ -17,8 +20,63 @@ export interface Booking {
   time?: string | null;
   message?: string | null;
   status: BookingStatus;
+  queue_number?: number | null;
+  estimated_arrival_start?: string | null;
+  estimated_arrival_end?: string | null;
+  patient_arrived: boolean;
+  arrived_at?: string | null;
+  payment_method: PaymentMethod;
+  payment_status: PaymentStatus;
+  reminder_status: ReminderStatus;
   created_at?: string;
   updated_at?: string;
+}
+
+/** Reduced confirmation returned by the public booking endpoint. */
+export interface BookingConfirmation {
+  id: number;
+  full_name: string;
+  treatment: string;
+  date: string;
+  status: BookingStatus;
+  queue_number: number;
+  patients_ahead: number;
+  estimated_arrival_start?: string | null;
+  estimated_arrival_end?: string | null;
+  payment_method: PaymentMethod;
+  payment_status: PaymentStatus;
+}
+
+export interface QueueStatus {
+  id: number;
+  date: string;
+  queue_number: number;
+  status: BookingStatus;
+  patient_arrived: boolean;
+  patients_ahead: number;
+  currently_serving: number | null;
+  estimated_arrival_start?: string | null;
+  estimated_arrival_end?: string | null;
+  payment_method: PaymentMethod;
+  payment_status: PaymentStatus;
+}
+
+export interface Availability {
+  date: string;
+  is_working_day: boolean;
+  opens: string | null;
+  closes: string | null;
+  patients_booked: number;
+  next_queue_number: number | null;
+  reason: string | null;
+}
+
+export interface ClinicSchedule {
+  working_days: number[];
+  hours_by_day: Record<string, { opens: string; closes: string } | null>;
+  min_consultation_minutes: number;
+  max_consultation_minutes: number;
+  booking_window_days: number;
 }
 
 export interface BookingCreateData {
@@ -27,8 +85,27 @@ export interface BookingCreateData {
   email?: string;
   treatment: string;
   date: string;
-  time?: string;
   message?: string;
+  payment_method: PaymentMethod;
+}
+
+/** A structured API error the UI can show directly to the user. */
+export class ApiError extends Error {
+  status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+async function parseErrorDetail(res: Response, fallback: string): Promise<string> {
+  try {
+    const data = await res.json();
+    return data.detail || fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 // ── Local Storage Token Management ──────────────────────────────────────────
@@ -124,43 +201,63 @@ export async function fetchBookings(token: string): Promise<Booking[]> {
   return INITIAL_DEMO_BOOKINGS;
 }
 
-/** Submit a public booking request */
-export async function submitBooking(data: BookingCreateData): Promise<Booking> {
+/**
+ * Submit a public queue-based booking request. The backend assigns the
+ * queue number, estimated arrival window and payment state — nothing here
+ * is computed on the client. Throws ApiError with a user-facing message on
+ * failure (no fabricated fallback: a faked queue number would be
+ * meaningless once the real backend is back online).
+ */
+export async function submitBooking(data: BookingCreateData): Promise<BookingConfirmation> {
+  let res: Response;
   try {
-    const res = await fetch(`${API_BASE_URL}/bookings/`, {
+    res = await fetch(`${API_BASE_URL}/bookings/`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-
-    if (res.ok) {
-      return await res.json();
-    }
   } catch {
-    // fallback
+    throw new ApiError("Could not reach the booking server. Please check your connection and try again.");
   }
 
-  // Fallback demo object creation
-  const newBooking: Booking = {
-    id: Date.now(),
-    full_name: data.full_name,
-    phone: data.phone,
-    email: data.email || null,
-    treatment: data.treatment,
-    date: data.date,
-    time: data.time || null,
-    message: data.message || null,
-    status: "pending",
-    created_at: new Date().toISOString(),
-  };
-
-  if (typeof window !== "undefined") {
-    const current = await fetchBookings("");
-    const updated = [newBooking, ...current];
-    localStorage.setItem("lumina_demo_bookings", JSON.stringify(updated));
+  if (!res.ok) {
+    throw new ApiError(await parseErrorDetail(res, "Could not complete your booking."), res.status);
   }
+  return res.json();
+}
 
-  return newBooking;
+/** Get the clinic's configured working days/hours & consultation duration. */
+export async function getClinicSchedule(): Promise<ClinicSchedule> {
+  const res = await fetch(`${API_BASE_URL}/clinic/schedule`, { cache: "no-store" });
+  if (!res.ok) throw new ApiError("Could not load the clinic schedule.", res.status);
+  return res.json();
+}
+
+/** Queue preview ("Patients already booked: N") for a candidate date. */
+export async function getAvailability(date: string): Promise<Availability> {
+  const res = await fetch(`${API_BASE_URL}/clinic/availability?date=${encodeURIComponent(date)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not check availability."), res.status);
+  return res.json();
+}
+
+/** Live queue position for a booking — used to poll the confirmation page. */
+export async function getQueueStatus(bookingId: number): Promise<QueueStatus> {
+  const res = await fetch(`${API_BASE_URL}/bookings/${bookingId}/queue-status`, { cache: "no-store" });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not load queue status."), res.status);
+  return res.json();
+}
+
+/** Confirm the (simulated) online payment for a booking. */
+export async function confirmOnlinePayment(bookingId: number, phone: string): Promise<Booking> {
+  const res = await fetch(`${API_BASE_URL}/bookings/${bookingId}/pay`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone }),
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Payment could not be confirmed."), res.status);
+  return res.json();
 }
 
 /** Update booking status */
@@ -191,6 +288,25 @@ export async function updateBookingStatus(
     localStorage.setItem("lumina_demo_bookings", JSON.stringify(updated));
   }
   return true;
+}
+
+/**
+ * Mark a patient as entered / not entered (staff only). The backend
+ * enforces the "booking date == today AND within working hours" rule —
+ * this call surfaces that rejection as an ApiError rather than silently
+ * falling back, since arrival state must stay authoritative.
+ */
+export async function updateArrivalStatus(token: string, bookingId: number, arrived: boolean): Promise<Booking> {
+  const res = await fetch(`${API_BASE_URL}/bookings/${bookingId}/arrival`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ arrived }),
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not update arrival status."), res.status);
+  return res.json();
 }
 
 /** Delete a booking */

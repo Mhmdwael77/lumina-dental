@@ -3,7 +3,6 @@
 import { useEffect, useState, useMemo } from "react";
 import {
   Calendar as CalendarIcon,
-  Clock,
   User,
   Phone,
   Mail,
@@ -28,8 +27,13 @@ import {
   ListFilter,
   CalendarDays,
   FileText,
+  CreditCard,
+  Wallet,
+  UserCheck,
+  UserX,
 } from "lucide-react";
 import {
+  ApiError,
   Booking,
   BookingStatus,
   getToken,
@@ -37,11 +41,12 @@ import {
   removeToken,
   fetchBookings,
   updateBookingStatus,
+  updateArrivalStatus,
   deleteBooking,
   submitBooking,
   checkBackendHealth,
 } from "@/lib/api";
-import { TREATMENT_OPTIONS, TIME_OPTIONS } from "@/lib/constants";
+import { TREATMENT_OPTIONS } from "@/lib/constants";
 
 export default function AdminPage() {
   const [token, setTokenState] = useState<string | null>(null);
@@ -73,14 +78,13 @@ export default function AdminPage() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
-  // New booking form state
+  // New booking form state (queue number is assigned automatically by the backend)
   const [newForm, setNewForm] = useState<{
     full_name: string;
     phone: string;
     email: string;
     treatment: string;
     date: string;
-    time: string;
     message: string;
   }>({
     full_name: "",
@@ -88,11 +92,14 @@ export default function AdminPage() {
     email: "",
     treatment: TREATMENT_OPTIONS[0],
     date: new Date().toISOString().split("T")[0],
-    time: TIME_OPTIONS[0],
     message: "",
   });
   const [newFormError, setNewFormError] = useState("");
   const [isSubmittingNew, setIsSubmittingNew] = useState(false);
+
+  // Arrival status update state (staff "Mark as Entered" control)
+  const [arrivalUpdatingId, setArrivalUpdatingId] = useState<number | null>(null);
+  const [arrivalError, setArrivalError] = useState("");
 
   // Check saved token on mount
   useEffect(() => {
@@ -189,17 +196,21 @@ export default function AdminPage() {
     setIsSubmittingNew(true);
     setNewFormError("");
     try {
-      const created = await submitBooking({
+      await submitBooking({
         full_name: newForm.full_name,
         phone: newForm.phone,
         email: newForm.email || undefined,
         treatment: newForm.treatment,
         date: newForm.date,
-        time: newForm.time,
         message: newForm.message || undefined,
+        payment_method: "clinic",
       });
 
-      setBookings((prev) => [created, ...prev]);
+      // Refetch instead of appending: the public booking endpoint only
+      // returns the patient-facing confirmation shape (no phone/email/etc),
+      // so the full authoritative record — including its assigned queue
+      // number — comes from the staff list endpoint.
+      await loadBookings();
       setShowNewModal(false);
       setNewForm({
         full_name: "",
@@ -207,13 +218,33 @@ export default function AdminPage() {
         email: "",
         treatment: TREATMENT_OPTIONS[0],
         date: selectedDate,
-        time: TIME_OPTIONS[0],
         message: "",
       });
-    } catch {
-      setNewFormError("Failed to create appointment.");
+    } catch (err) {
+      setNewFormError(err instanceof ApiError ? err.message : "Failed to create appointment.");
     } finally {
       setIsSubmittingNew(false);
+    }
+  };
+
+  const todayIso = () => new Date().toISOString().split("T")[0];
+
+  const canMarkEntered = (b: Booking) => b.date === todayIso() && b.status !== "cancelled";
+
+  const handleToggleArrival = async (b: Booking) => {
+    setArrivalError("");
+    setArrivalUpdatingId(b.id);
+    const nextArrived = !b.patient_arrived;
+    try {
+      const updated = await updateArrivalStatus(token || "", b.id, nextArrived);
+      setBookings((prev) => prev.map((x) => (x.id === b.id ? updated : x)));
+      if (selectedBooking?.id === b.id) setSelectedBooking(updated);
+    } catch (err) {
+      setArrivalError(
+        err instanceof ApiError ? err.message : "Could not update arrival status."
+      );
+    } finally {
+      setArrivalUpdatingId(null);
     }
   };
 
@@ -476,6 +507,20 @@ export default function AdminPage() {
 
       {/* Main Container */}
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+        {arrivalError && (
+          <div className="flex items-start gap-2.5 p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-700 text-sm">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span className="flex-1">{arrivalError}</span>
+            <button
+              onClick={() => setArrivalError("")}
+              className="text-red-700/60 hover:text-red-700"
+              title="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Analytics Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white border border-[#101820]/10 rounded-2xl p-5 shadow-sm">
@@ -652,10 +697,10 @@ export default function AdminPage() {
                     {/* Patient Info & Details */}
                     <div className="space-y-3 flex-1">
                       <div className="flex flex-wrap items-center gap-3">
-                        {/* Time Slot Badge */}
+                        {/* Queue Number Badge */}
                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#101820] text-[#f4f1eb] font-serif text-sm font-medium">
-                          <Clock className="w-3.5 h-3.5 text-[#b99a6b]" />
-                          {b.time || "Any time"}
+                          <ListFilter className="w-3.5 h-3.5 text-[#b99a6b]" />
+                          Queue #{b.queue_number ?? "—"}
                         </span>
 
                         {/* Status Badge */}
@@ -671,6 +716,38 @@ export default function AdminPage() {
                           }`}
                         >
                           ● {b.status.toUpperCase()}
+                        </span>
+
+                        {/* Arrival Badge */}
+                        <span
+                          className={`inline-flex items-center gap-1 text-xs px-3 py-1 rounded-full font-medium border ${
+                            b.patient_arrived
+                              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700"
+                              : "bg-[#101820]/5 border-[#101820]/15 text-[#101820]/60"
+                          }`}
+                        >
+                          {b.patient_arrived ? <UserCheck className="w-3.5 h-3.5" /> : <UserX className="w-3.5 h-3.5" />}
+                          {b.patient_arrived ? "Entered" : "Not Entered"}
+                        </span>
+
+                        {/* Payment Badge */}
+                        <span
+                          className={`inline-flex items-center gap-1 text-xs px-3 py-1 rounded-full font-medium border ${
+                            b.payment_method === "online" && b.payment_status === "paid"
+                              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700"
+                              : "bg-amber-500/10 border-amber-500/30 text-amber-800"
+                          }`}
+                        >
+                          {b.payment_method === "online" ? (
+                            <CreditCard className="w-3.5 h-3.5" />
+                          ) : (
+                            <Wallet className="w-3.5 h-3.5" />
+                          )}
+                          {b.payment_method === "online"
+                            ? b.payment_status === "paid"
+                              ? "Paid Online"
+                              : "Online — Pending"
+                            : "Pay at Clinic"}
                         </span>
 
                         {/* Treatment Name */}
@@ -778,6 +855,39 @@ export default function AdminPage() {
                           Cancel
                         </button>
                       </div>
+
+                      {/* Arrival control — backend enforces booking date == today AND within working hours */}
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[0.65rem] text-[#101820]/50 uppercase tracking-wider mr-1">
+                          Arrival:
+                        </span>
+                        <button
+                          onClick={() => handleToggleArrival(b)}
+                          disabled={arrivalUpdatingId === b.id || (!b.patient_arrived && !canMarkEntered(b))}
+                          title={
+                            !b.patient_arrived && !canMarkEntered(b)
+                              ? "Can only mark as entered on the booking date, during working hours"
+                              : undefined
+                          }
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all disabled:cursor-not-allowed disabled:opacity-40 ${
+                            b.patient_arrived
+                              ? "bg-[#f4f1eb] text-[#101820]/70 hover:bg-red-500/10 hover:text-red-700"
+                              : "bg-emerald-600 text-white hover:bg-emerald-700 shadow disabled:hover:bg-emerald-600"
+                          }`}
+                        >
+                          {arrivalUpdatingId === b.id ? (
+                            "Updating…"
+                          ) : b.patient_arrived ? (
+                            <>
+                              <UserX className="w-3.5 h-3.5" /> Mark as Not Entered
+                            </>
+                          ) : (
+                            <>
+                              <UserCheck className="w-3.5 h-3.5" /> Mark as Entered
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -835,7 +945,9 @@ export default function AdminPage() {
                     <tr className="border-b border-[#101820]/10 bg-[#f4f1eb]/50 text-[0.65rem] font-medium uppercase tracking-[0.2em] text-[#101820]/50">
                       <th className="py-4 px-6">Patient</th>
                       <th className="py-4 px-6">Treatment</th>
-                      <th className="py-4 px-6">Date & Time</th>
+                      <th className="py-4 px-6">Date & Queue</th>
+                      <th className="py-4 px-6">Payment</th>
+                      <th className="py-4 px-6">Arrival</th>
                       <th className="py-4 px-6">Status</th>
                       <th className="py-4 px-6 text-right">Actions</th>
                     </tr>
@@ -843,7 +955,7 @@ export default function AdminPage() {
                   <tbody className="divide-y divide-[#101820]/5 text-sm">
                     {filteredBookings.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="py-12 text-center text-[#101820]/50">
+                        <td colSpan={7} className="py-12 text-center text-[#101820]/50">
                           <div className="flex flex-col items-center justify-center gap-2">
                             <AlertCircle className="w-8 h-8 text-[#b99a6b]" />
                             <p className="font-serif text-base text-[#101820]">
@@ -883,16 +995,59 @@ export default function AdminPage() {
                             </span>
                           </td>
 
-                          {/* Date & Time */}
+                          {/* Date & Queue */}
                           <td className="py-4 px-6">
                             <div className="flex items-center gap-1.5 text-xs text-[#101820]">
                               <CalendarIcon className="w-3.5 h-3.5 text-[#b99a6b]" />
                               <span>{b.date}</span>
                             </div>
                             <div className="flex items-center gap-1.5 text-[0.72rem] text-[#101820]/50 mt-0.5">
-                              <Clock className="w-3 h-3 text-[#101820]/30" />
-                              <span>{b.time || "Any time"}</span>
+                              <ListFilter className="w-3 h-3 text-[#101820]/30" />
+                              <span>Queue #{b.queue_number ?? "—"}</span>
                             </div>
+                          </td>
+
+                          {/* Payment */}
+                          <td className="py-4 px-6">
+                            <span
+                              className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg font-medium border ${
+                                b.payment_method === "online" && b.payment_status === "paid"
+                                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700"
+                                  : "bg-amber-500/10 border-amber-500/30 text-amber-800"
+                              }`}
+                            >
+                              {b.payment_method === "online" ? (
+                                <CreditCard className="w-3.5 h-3.5" />
+                              ) : (
+                                <Wallet className="w-3.5 h-3.5" />
+                              )}
+                              {b.payment_method === "online"
+                                ? b.payment_status === "paid"
+                                  ? "Paid Online"
+                                  : "Online — Pending"
+                                : "Pending — Pay at Clinic"}
+                            </span>
+                          </td>
+
+                          {/* Arrival */}
+                          <td className="py-4 px-6">
+                            <button
+                              onClick={() => handleToggleArrival(b)}
+                              disabled={arrivalUpdatingId === b.id || (!b.patient_arrived && !canMarkEntered(b))}
+                              title={
+                                !b.patient_arrived && !canMarkEntered(b)
+                                  ? "Can only mark as entered on the booking date, during working hours"
+                                  : undefined
+                              }
+                              className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg font-medium transition-all disabled:cursor-not-allowed disabled:opacity-40 ${
+                                b.patient_arrived
+                                  ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 hover:bg-red-500/10 hover:text-red-700"
+                                  : "bg-[#101820]/5 border border-[#101820]/15 text-[#101820]/60 hover:bg-emerald-500/10 hover:text-emerald-700"
+                              }`}
+                            >
+                              {b.patient_arrived ? <UserCheck className="w-3.5 h-3.5" /> : <UserX className="w-3.5 h-3.5" />}
+                              {arrivalUpdatingId === b.id ? "…" : b.patient_arrived ? "Entered" : "Not Entered"}
+                            </button>
                           </td>
 
                           {/* Status Dropdown */}
@@ -1014,10 +1169,29 @@ export default function AdminPage() {
 
                 <div>
                   <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50">
-                    Time
+                    Queue Number
                   </span>
                   <span className="text-[#101820] font-medium">
-                    {selectedBooking.time || "Any time"}
+                    #{selectedBooking.queue_number ?? "—"}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50">
+                    Payment
+                  </span>
+                  <span className="text-[#101820] font-medium">
+                    {selectedBooking.payment_method === "online" ? "Online" : "Pay at Clinic"} —{" "}
+                    {selectedBooking.payment_status === "paid" ? "Paid" : "Pending"}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50">
+                    Arrival
+                  </span>
+                  <span className="text-[#101820] font-medium">
+                    {selectedBooking.patient_arrived ? "Entered" : "Not Entered"}
                   </span>
                 </div>
               </div>
@@ -1173,31 +1347,20 @@ export default function AdminPage() {
                 </div>
 
                 <div>
-                  <label className="block text-[#101820]/60 mb-1">Preferred Time</label>
-                  <select
-                    value={newForm.time}
-                    onChange={(e) => setNewForm({ ...newForm, time: e.target.value })}
-                    className="w-full bg-[#f4f1eb] border border-[#101820]/15 rounded-xl px-3 py-2 text-[#101820] outline-none focus:border-[#b99a6b]"
-                  >
-                    {TIME_OPTIONS.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
+                  <label className="block text-[#101820]/60 mb-1">Booking Date *</label>
+                  <input
+                    type="date"
+                    required
+                    value={newForm.date}
+                    onChange={(e) => setNewForm({ ...newForm, date: e.target.value })}
+                    className="w-full bg-[#f4f1eb]/60 border border-[#101820]/15 rounded-xl px-3 py-2 text-[#101820] outline-none focus:border-[#b99a6b]"
+                  />
                 </div>
               </div>
-
-              <div>
-                <label className="block text-[#101820]/60 mb-1">Preferred Date *</label>
-                <input
-                  type="date"
-                  required
-                  value={newForm.date}
-                  onChange={(e) => setNewForm({ ...newForm, date: e.target.value })}
-                  className="w-full bg-[#f4f1eb]/60 border border-[#101820]/15 rounded-xl px-3 py-2 text-[#101820] outline-none focus:border-[#b99a6b]"
-                />
-              </div>
+              <p className="text-[0.65rem] text-[#101820]/40 -mt-2">
+                A queue number is assigned automatically for this date — payment defaults to
+                &ldquo;Pay at Clinic&rdquo; for staff-entered bookings.
+              </p>
 
               <div>
                 <label className="block text-[#101820]/60 mb-1">

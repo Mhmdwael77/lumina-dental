@@ -2,13 +2,17 @@
 Booking endpoints.
 
 Public:
-  POST /bookings/            – Submit a new appointment request (no auth needed)
+  POST   /bookings/                    – Submit a queue-based booking request (no auth needed)
+  GET    /bookings/{id}/queue-status   – Live queue position for one booking
+  POST   /bookings/{id}/pay            – Confirm simulated online payment
 
 Staff / Admin (JWT required):
-  GET  /bookings/            – List all bookings (with optional ?status= filter)
-  GET  /bookings/{id}        – Get a single booking
-  PATCH /bookings/{id}/status – Update a booking's status
-  DELETE /bookings/{id}      – Remove a booking
+  GET    /bookings/                    – List all bookings (optional ?status=, ?date=)
+  GET    /bookings/{id}                – Get a single booking
+  PATCH  /bookings/{id}/status         – Update a booking's status
+  PATCH  /bookings/{id}/arrival        – Mark a patient as entered / not entered
+  DELETE /bookings/{id}                – Remove a booking
+  POST   /bookings/reminders/dispatch  – Send due WhatsApp reminders
 """
 
 from fastapi import APIRouter, Depends, Query, status
@@ -21,14 +25,22 @@ from schemas.booking import (
     BookingStatusUpdate,
     BookingResponse,
     BookingPublicResponse,
+    QueueStatusResponse,
+    ArrivalUpdate,
+    PaymentConfirmRequest,
 )
 from services.booking_service import (
     validate_and_create_booking,
+    booking_to_public_response,
+    get_queue_status,
+    confirm_online_payment,
+    mark_arrival,
     list_bookings,
     get_single_booking,
     change_booking_status,
     remove_booking,
 )
+from services.reminder_service import dispatch_due_reminders
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
 
@@ -42,7 +54,25 @@ router = APIRouter(prefix="/bookings", tags=["Bookings"])
 )
 def create_booking(data: BookingCreate, db: Session = Depends(get_db)):
     booking = validate_and_create_booking(db, data)
-    return booking
+    return booking_to_public_response(db, booking)
+
+
+@router.get(
+    "/{booking_id}/queue-status",
+    response_model=QueueStatusResponse,
+    summary="Live queue position for a booking (public)",
+)
+def queue_status(booking_id: int, db: Session = Depends(get_db)):
+    return get_queue_status(db, booking_id)
+
+
+@router.post(
+    "/{booking_id}/pay",
+    response_model=BookingResponse,
+    summary="Confirm simulated online payment (public)",
+)
+def pay_booking(booking_id: int, body: PaymentConfirmRequest, db: Session = Depends(get_db)):
+    return confirm_online_payment(db, booking_id, body.phone)
 
 
 # ── Staff / Admin ─────────────────────────────────────────────────────────────
@@ -55,10 +85,11 @@ def list_all_bookings(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     status_filter: str | None = Query(None, alias="status"),
+    date: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
     db: Session = Depends(get_db),
     _: User = Depends(require_staff),
 ):
-    return list_bookings(db, skip=skip, limit=limit, status_filter=status_filter)
+    return list_bookings(db, skip=skip, limit=limit, status_filter=status_filter, date=date)
 
 
 @router.get(
@@ -86,6 +117,31 @@ def update_status(
     _: User = Depends(require_staff),
 ):
     return change_booking_status(db, booking_id, body)
+
+
+@router.patch(
+    "/{booking_id}/arrival",
+    response_model=BookingResponse,
+    summary="Mark a patient as entered / not entered (staff)",
+)
+def update_arrival(
+    booking_id: int,
+    body: ArrivalUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_staff),
+):
+    return mark_arrival(db, booking_id, body.arrived)
+
+
+@router.post(
+    "/reminders/dispatch",
+    summary="Send WhatsApp reminders to patients whose turn is approaching (staff)",
+)
+def dispatch_reminders(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_staff),
+):
+    return dispatch_due_reminders(db)
 
 
 @router.delete(

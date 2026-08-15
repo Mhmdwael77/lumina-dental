@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef } from "react";
+import Link from "next/link";
 import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { ArrowUpRight } from "lucide-react";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
@@ -63,8 +64,8 @@ export function FinalCTA() {
           <em className="italic text-cream/90">starts here.</em>
         </h2>
 
-        <a
-          href="#booking"
+        <Link
+          href="/booking"
           className="group mt-12 inline-flex items-center gap-2.5 rounded-full bg-cream px-9 py-5 text-xs font-medium uppercase tracking-[0.2em] text-ink transition-all duration-300 hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold"
         >
           Book an Appointment
@@ -73,7 +74,7 @@ export function FinalCTA() {
             strokeWidth={1.5}
             aria-hidden="true"
           />
-        </a>
+        </Link>
       </div>
     </section>
   );

@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { ArrowDown, ArrowUpRight, Star } from "lucide-react";
 import { HERO_PIN_END } from "@/lib/animations";
@@ -152,8 +153,8 @@ export function Hero() {
             ref={buttonsRef}
             className="mt-7 flex flex-col gap-3 sm:mt-10 sm:flex-row sm:items-center sm:gap-4"
           >
-            <a
-              href="#booking"
+            <Link
+              href="/booking"
               className="group inline-flex items-center justify-center gap-2 rounded-full bg-ink px-8 py-4 text-xs font-medium uppercase tracking-[0.2em] text-cream transition-all duration-300 hover:bg-ink/85 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold"
             >
               Book an Appointment
@@ -162,7 +163,7 @@ export function Hero() {
                 strokeWidth={1.5}
                 aria-hidden="true"
               />
-            </a>
+            </Link>
             <a
               href="#treatments"
               className="inline-flex items-center justify-center gap-2 rounded-full border border-ink/15 px-8 py-4 text-xs font-medium uppercase tracking-[0.2em] text-ink transition-colors duration-300 hover:border-ink/40 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold"
