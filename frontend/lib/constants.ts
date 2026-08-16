@@ -272,6 +272,23 @@ export const TREATMENT_OPTIONS = [
   "Pediatric Dentistry",
 ] as const;
 
+/**
+ * The label used for a consultation "service". Kept as a single constant so
+ * the booking page, admin, and the "is this a consultation?" check never
+ * drift apart. Must match backend `CONSULTATION_LABEL`.
+ */
+export const CONSULTATION_SERVICE = "Consultation";
+
+/**
+ * Full service picker for the booking form: a consultation request plus the
+ * clinic's existing treatments. Choosing "Consultation" flags the booking as
+ * a consultation; everything else is a normal treatment appointment.
+ */
+export const SERVICE_OPTIONS = [
+  CONSULTATION_SERVICE,
+  ...TREATMENT_OPTIONS,
+] as const;
+
 export const TIME_OPTIONS = [
   "10:00 AM",
   "11:30 AM",

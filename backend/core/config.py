@@ -12,10 +12,20 @@ class Settings(BaseSettings):
     # ── JWT / Auth ────────────────────────────────────────────────────────
     SECRET_KEY: str = "change-me-to-a-long-random-string-in-production"
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    # 7 days — a clinic admin shouldn't be silently logged out mid-shift (a
+    # 60-min token was expiring during use, which made the dashboard fall back
+    # to an empty list on refresh and look like the data had been wiped).
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
 
     # ── CORS ──────────────────────────────────────────────────────────────
-    CORS_ORIGINS: str = "http://localhost:3000"
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+    # Also allow any localhost / 127.0.0.1 / private-LAN origin on any port, so
+    # the dashboard connects whether it's opened via localhost, 127.0.0.1, or a
+    # LAN IP (phone/other device on the same network).
+    CORS_ORIGIN_REGEX: str = (
+        r"^https?://(localhost|127\.0\.0\.1|"
+        r"192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3})(:\d+)?$"
+    )
 
     # ── Queue / consultation timing ──────────────────────────────────────
     MIN_CONSULTATION_MINUTES: int = 10

@@ -31,6 +31,8 @@ import {
   Wallet,
   UserCheck,
   UserX,
+  Stethoscope,
+  CalendarClock,
 } from "lucide-react";
 import {
   ApiError,
@@ -42,11 +44,64 @@ import {
   fetchBookings,
   updateBookingStatus,
   updateArrivalStatus,
+  updateConsultationHintDismissed,
   deleteBooking,
   submitBooking,
   checkBackendHealth,
 } from "@/lib/api";
-import { TREATMENT_OPTIONS } from "@/lib/constants";
+import { TREATMENT_OPTIONS, SERVICE_OPTIONS, CONSULTATION_SERVICE } from "@/lib/constants";
+
+/** A booking is a consultation when the backend tagged its service type. */
+const isConsultation = (b: Booking) => b.service_type === "consultation";
+
+/** Digits only, for tolerant phone comparison. */
+const digitsOf = (s?: string | null) => (s || "").replace(/\D/g, "");
+
+/**
+ * Do two phone numbers belong to the same patient? Patients have no account,
+ * so the phone is the identity key. Tolerant of country-code / leading-zero
+ * differences (e.g. "01552007412" vs "+201552007412") by matching on a
+ * common suffix once both have enough significant digits.
+ */
+const phonesMatch = (a?: string | null, b?: string | null) => {
+  const x = digitsOf(a);
+  const y = digitsOf(b);
+  if (x.length < 7 || y.length < 7) return false;
+  return x === y || x.endsWith(y) || y.endsWith(x);
+};
+
+/** Render the queue-based arrival window as the appointment "time", or a
+ *  neutral placeholder when the backend hasn't computed one. */
+function formatEstimatedTime(b: Booking): string {
+  const fmt = (iso?: string | null) => {
+    if (!iso) return null;
+    try {
+      return new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    } catch {
+      return null;
+    }
+  };
+  const a = fmt(b.estimated_arrival_start);
+  const z = fmt(b.estimated_arrival_end);
+  if (!a || !z) return "Queue-based";
+  return a === z ? a : `${a} – ${z}`;
+}
+
+/** Short, safe formatter for the created-at timestamp. */
+function formatCreatedAt(iso?: string): string {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
 
 export default function AdminPage() {
   const [token, setTokenState] = useState<string | null>(null);
@@ -58,8 +113,9 @@ export default function AdminPage() {
   const [authError, setAuthError] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // Dashboard view mode: "agenda" (Day view) or "table" (All bookings)
-  const [viewMode, setViewMode] = useState<"agenda" | "table">("agenda");
+  // Dashboard view mode: "agenda" (Day view), "table" (All bookings) or
+  // "consultations" (only consultation requests, across all days).
+  const [viewMode, setViewMode] = useState<"agenda" | "table" | "consultations">("agenda");
 
   // Selected Date for Agenda View (YYYY-MM-DD)
   const [selectedDate, setSelectedDate] = useState<string>(
@@ -125,8 +181,15 @@ export default function AdminPage() {
       setIsOnline(online);
       const data = await fetchBookings(activeToken);
       setBookings(data);
-    } catch {
-      // Handled in api helper
+    } catch (err) {
+      // Session expired / invalid: go back to the login screen with a clear
+      // message instead of leaving an empty dashboard that looks like the data
+      // was deleted. (The records are safe on the backend the whole time.)
+      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+        removeToken();
+        setTokenState(null);
+        setAuthError("Your session has expired — please sign in again. Your data is safe.");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -201,6 +264,7 @@ export default function AdminPage() {
         phone: newForm.phone,
         email: newForm.email || undefined,
         treatment: newForm.treatment,
+        service_type: newForm.treatment === CONSULTATION_SERVICE ? "consultation" : "treatment",
         date: newForm.date,
         message: newForm.message || undefined,
         payment_method: "clinic",
@@ -245,6 +309,24 @@ export default function AdminPage() {
       );
     } finally {
       setArrivalUpdatingId(null);
+    }
+  };
+
+  // Show / hide the "patient also has a consultation" reminder on a completed
+  // exam. `dismissed=true` hides it, `false` brings it back. Optimistic update
+  // (the memo reflects it → badge appears/vanishes), then persists; rolls back
+  // by refetching on failure.
+  const handleSetConsultationHint = async (bookingId: number, dismissed: boolean) => {
+    setBookings((prev) =>
+      prev.map((b) => (b.id === bookingId ? { ...b, consultation_hint_dismissed: dismissed } : b))
+    );
+    if (selectedBooking?.id === bookingId) {
+      setSelectedBooking((prev) => (prev ? { ...prev, consultation_hint_dismissed: dismissed } : prev));
+    }
+    try {
+      await updateConsultationHintDismissed(token || "", bookingId, dismissed);
+    } catch {
+      loadBookings();
     }
   };
 
@@ -295,6 +377,50 @@ export default function AdminPage() {
       return matchesStatus && matchesQuery;
     });
   }, [bookings, statusFilter, searchQuery]);
+
+  // Consultation requests only, across every day — most recent date first so
+  // staff triage newly-requested consultations at the top.
+  const consultationBookings = useMemo(() => {
+    return bookings
+      .filter(isConsultation)
+      .sort(
+        (a, b) =>
+          b.date.localeCompare(a.date) ||
+          (a.queue_number ?? 0) - (b.queue_number ?? 0)
+      );
+  }, [bookings]);
+
+  // Every COMPLETED exam that has the same patient's consultation (matched by
+  // phone), IGNORING the show/hide flag. Drives whether the "Has consultation"
+  // toggle button appears at all — so staff can flip it back on after hiding it.
+  const examsWithMatchedConsultation = useMemo(() => {
+    const consults = bookings.filter(isConsultation);
+    const map = new Map<number, Booking>();
+    for (const b of bookings) {
+      if (b.status !== "completed" || isConsultation(b)) continue;
+      const match = consults.find((c) => phonesMatch(c.phone, b.phone));
+      if (match) map.set(b.id, match);
+    }
+    return map;
+  }, [bookings]);
+
+  // The subset staff have left visible (not dismissed) — drives the badges and
+  // the Consultations-tab follow-up cards.
+  const consultationForCompletedId = useMemo(() => {
+    const map = new Map<number, Booking>();
+    for (const [bid, cons] of examsWithMatchedConsultation) {
+      const b = bookings.find((x) => x.id === bid);
+      if (b && !b.consultation_hint_dismissed) map.set(bid, cons);
+    }
+    return map;
+  }, [bookings, examsWithMatchedConsultation]);
+
+  // Completed exams whose patient has a consultation (and not dismissed) — these
+  // also surface in the Consultations tab so staff see the follow-up is due.
+  const completedExamsWithConsultation = useMemo(
+    () => bookings.filter((b) => consultationForCompletedId.has(b.id)),
+    [bookings, consultationForCompletedId]
+  );
 
   // Statistics calculation
   const stats = useMemo(() => {
@@ -455,6 +581,28 @@ export default function AdminPage() {
               >
                 <ListFilter className="w-3.5 h-3.5" />
                 <span>All Bookings</span>
+              </button>
+              <button
+                onClick={() => setViewMode("consultations")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium uppercase tracking-[0.12em] transition-all ${
+                  viewMode === "consultations"
+                    ? "bg-[#101820] text-[#f4f1eb] shadow"
+                    : "text-[#101820]/60 hover:text-[#101820]"
+                }`}
+              >
+                <Stethoscope className="w-3.5 h-3.5" />
+                <span>Consultations</span>
+                {consultationBookings.length + completedExamsWithConsultation.length > 0 && (
+                  <span
+                    className={`ml-0.5 rounded-full px-1.5 py-0.5 text-[0.6rem] font-semibold leading-none ${
+                      viewMode === "consultations"
+                        ? "bg-[#b99a6b] text-[#101820]"
+                        : "bg-[#101820]/10 text-[#101820]"
+                    }`}
+                  >
+                    {consultationBookings.length + completedExamsWithConsultation.length}
+                  </span>
+                )}
               </button>
             </div>
 
@@ -750,10 +898,36 @@ export default function AdminPage() {
                             : "Pay at Clinic"}
                         </span>
 
-                        {/* Treatment Name */}
+                        {/* Consultation flag — distinguishes it from a treatment */}
+                        {isConsultation(b) && (
+                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-[#b99a6b] text-[#101820] text-xs font-semibold">
+                            <Stethoscope className="w-3.5 h-3.5" />
+                            Consultation
+                          </span>
+                        )}
+
+                        {/* Treatment / Service Name */}
                         <span className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-[#f4f1eb] text-[#101820] text-xs font-serif font-medium border border-[#101820]/10">
                           {b.treatment}
                         </span>
+
+                        {/* Completed exam whose patient also has a consultation */}
+                        {consultationForCompletedId.get(b.id) && (
+                          <span
+                            title={`Consultation booked for ${consultationForCompletedId.get(b.id)?.date}`}
+                            className="inline-flex items-center gap-1 pl-3 pr-1.5 py-1 rounded-xl bg-[#b99a6b] text-[#101820] text-xs font-semibold"
+                          >
+                            <Stethoscope className="w-3.5 h-3.5" />
+                            Has consultation
+                            <button
+                              onClick={() => handleSetConsultationHint(b.id, true)}
+                              title="Dismiss this reminder"
+                              className="ml-0.5 rounded-full p-0.5 text-[#101820]/70 hover:bg-[#101820]/15 hover:text-[#101820] transition-colors"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </span>
+                        )}
                       </div>
 
                       {/* Patient Name */}
@@ -888,6 +1062,34 @@ export default function AdminPage() {
                           )}
                         </button>
                       </div>
+
+                      {/* Consultation toggle — appears once the exam is completed and
+                          the patient has a consultation. Flip it on/off (yes/no). */}
+                      {examsWithMatchedConsultation.has(b.id) && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[0.65rem] text-[#101820]/50 uppercase tracking-wider mr-1">
+                            Consultation:
+                          </span>
+                          <button
+                            onClick={() =>
+                              handleSetConsultationHint(b.id, !b.consultation_hint_dismissed)
+                            }
+                            title={
+                              b.consultation_hint_dismissed
+                                ? "This patient has a consultation — click to show it"
+                                : "Click to remove the consultation reminder"
+                            }
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                              !b.consultation_hint_dismissed
+                                ? "bg-[#b99a6b] text-[#101820] hover:bg-[#b99a6b]/85 shadow"
+                                : "bg-[#f4f1eb] text-[#101820]/70 hover:bg-[#b99a6b]/20 hover:text-[#101820]"
+                            }`}
+                          >
+                            <Stethoscope className="w-3.5 h-3.5" />
+                            {b.consultation_hint_dismissed ? "No consultation" : "Has consultation"}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -988,11 +1190,36 @@ export default function AdminPage() {
                             </div>
                           </td>
 
-                          {/* Treatment */}
+                          {/* Treatment / Service */}
                           <td className="py-4 px-6">
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[#f4f1eb] border border-[#101820]/10 text-xs font-serif text-[#101820]">
-                              {b.treatment}
-                            </span>
+                            <div className="flex flex-col items-start gap-1.5">
+                              {isConsultation(b) ? (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[#b99a6b] text-[#101820] text-xs font-semibold">
+                                  <Stethoscope className="w-3.5 h-3.5" />
+                                  Consultation
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[#f4f1eb] border border-[#101820]/10 text-xs font-serif text-[#101820]">
+                                  {b.treatment}
+                                </span>
+                              )}
+                              {consultationForCompletedId.get(b.id) && (
+                                <span
+                                  title={`Consultation booked for ${consultationForCompletedId.get(b.id)?.date}`}
+                                  className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-lg bg-[#b99a6b] text-[#101820] text-[0.68rem] font-semibold"
+                                >
+                                  <Stethoscope className="w-3 h-3" />
+                                  Has consultation
+                                  <button
+                                    onClick={() => handleSetConsultationHint(b.id, true)}
+                                    title="Dismiss this reminder"
+                                    className="ml-0.5 rounded-full p-0.5 text-[#101820]/70 hover:bg-[#101820]/15 hover:text-[#101820] transition-colors"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </span>
+                              )}
+                            </div>
                           </td>
 
                           {/* Date & Queue */}
@@ -1104,6 +1331,304 @@ export default function AdminPage() {
             </div>
           </div>
         )}
+
+        {/* ── 5. CONSULTATIONS VIEW (consultation requests only) ──────────────── */}
+        {viewMode === "consultations" && (
+          <div className="space-y-6">
+            {/* Section header */}
+            <div className="bg-white border border-[#101820]/10 rounded-2xl p-5 shadow-sm flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="h-11 w-11 rounded-xl bg-[#101820] text-[#b99a6b] flex items-center justify-center">
+                  <Stethoscope className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="font-serif text-2xl font-medium text-[#101820]">
+                    Consultation Requests
+                  </h2>
+                  <p className="text-xs text-[#101820]/50 mt-0.5">
+                    Consultation requests (
+                    <strong className="text-[#101820]">{consultationBookings.length}</strong>) plus
+                    completed exams whose patient has a consultation to follow (
+                    <strong className="text-[#101820]">{completedExamsWithConsultation.length}</strong>).
+                    Use the <span className="font-medium">✕</span> on a follow-up to remove it from this list.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {consultationBookings.length + completedExamsWithConsultation.length === 0 ? (
+              <div className="bg-white border border-[#101820]/10 rounded-2xl p-12 text-center shadow-sm">
+                <div className="max-w-md mx-auto flex flex-col items-center gap-3">
+                  <div className="h-14 w-14 rounded-full bg-[#f4f1eb] text-[#b99a6b] flex items-center justify-center">
+                    <Stethoscope className="w-7 h-7" />
+                  </div>
+                  <h3 className="font-serif text-xl font-medium text-[#101820]">
+                    No consultation requests yet
+                  </h3>
+                  <p className="text-xs text-[#101820]/60 leading-relaxed">
+                    When a patient books a &ldquo;Consultation&rdquo; from the website, it appears here —
+                    separate from normal treatment appointments.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4">
+                {consultationBookings.map((b) => (
+                  <div
+                    key={b.id}
+                    className="bg-white border border-[#101820]/10 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow flex flex-col lg:flex-row lg:items-center justify-between gap-6"
+                  >
+                    {/* Consultation info */}
+                    <div className="space-y-3 flex-1">
+                      <div className="flex flex-wrap items-center gap-3">
+                        {/* Consultation badge — distinguishes it from appointments */}
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#b99a6b] text-[#101820] text-xs font-semibold">
+                          <Stethoscope className="w-3.5 h-3.5" />
+                          Consultation
+                        </span>
+
+                        {/* Status badge */}
+                        <span
+                          className={`text-xs px-3 py-1 rounded-full font-medium border ${
+                            b.status === "confirmed"
+                              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700"
+                              : b.status === "completed"
+                              ? "bg-blue-500/10 border-blue-500/30 text-blue-700"
+                              : b.status === "cancelled"
+                              ? "bg-red-500/10 border-red-500/30 text-red-700"
+                              : "bg-amber-500/10 border-amber-500/30 text-amber-800"
+                          }`}
+                        >
+                          ● {b.status.toUpperCase()}
+                        </span>
+
+                        {/* Queue number */}
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#f4f1eb] text-[#101820] text-xs font-medium border border-[#101820]/10">
+                          <ListFilter className="w-3.5 h-3.5 text-[#b99a6b]" />
+                          Queue #{b.queue_number ?? "—"}
+                        </span>
+                      </div>
+
+                      {/* Patient */}
+                      <div>
+                        <h3 className="font-serif text-2xl font-medium text-[#101820]">
+                          {b.full_name}
+                        </h3>
+                        <div className="flex flex-wrap items-center gap-4 text-xs text-[#101820]/60 mt-1">
+                          <span className="flex items-center gap-1.5 font-mono">
+                            <Phone className="w-3.5 h-3.5 text-[#b99a6b]" /> {b.phone}
+                          </span>
+                          {b.email && (
+                            <span className="flex items-center gap-1.5">
+                              <Mail className="w-3.5 h-3.5 text-[#101820]/40" /> {b.email}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Date / time / created */}
+                      <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-xs text-[#101820]/70">
+                        <span className="flex items-center gap-1.5">
+                          <CalendarIcon className="w-3.5 h-3.5 text-[#b99a6b]" /> {b.date}
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <Clock3 className="w-3.5 h-3.5 text-[#b99a6b]" /> {formatEstimatedTime(b)}
+                        </span>
+                        <span className="flex items-center gap-1.5 text-[#101820]/45">
+                          <CalendarClock className="w-3.5 h-3.5" /> Requested {formatCreatedAt(b.created_at)}
+                        </span>
+                      </div>
+
+                      {/* Patient note */}
+                      {b.message && (
+                        <div className="p-3 rounded-xl bg-[#f4f1eb]/70 border border-[#101820]/10 text-xs text-[#101820]/80 italic max-w-2xl">
+                          &ldquo;{b.message}&rdquo;
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex flex-wrap lg:flex-col items-center lg:items-end gap-2 border-t lg:border-t-0 lg:border-l border-[#101820]/10 pt-4 lg:pt-0 lg:pl-6">
+                      <div className="flex items-center gap-2 w-full justify-start lg:justify-end">
+                        <a
+                          href={`tel:${b.phone}`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#f4f1eb] hover:bg-[#101820] hover:text-white border border-[#101820]/15 text-xs text-[#101820] transition-colors"
+                        >
+                          <PhoneCall className="w-3.5 h-3.5 text-[#b99a6b]" />
+                          <span>Call</span>
+                        </a>
+                        <a
+                          href={`https://wa.me/${b.phone.replace(/[^0-9]/g, "")}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-xs text-emerald-800 transition-colors"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>WhatsApp</span>
+                        </a>
+                        <button
+                          onClick={() => setSelectedBooking(b)}
+                          className="p-1.5 rounded-xl bg-[#f4f1eb] hover:bg-[#101820] hover:text-white border border-[#101820]/15 text-[#101820] transition-colors"
+                          title="View Full Info"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(b.id)}
+                          className="p-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-600 transition-colors"
+                          title="Delete Consultation"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {/* Status switcher */}
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span className="text-[0.65rem] text-[#101820]/50 uppercase tracking-wider mr-1">
+                          Status:
+                        </span>
+                        <button
+                          onClick={() => handleStatusChange(b.id, "confirmed")}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                            b.status === "confirmed"
+                              ? "bg-emerald-600 text-white shadow"
+                              : "bg-[#f4f1eb] text-[#101820]/70 hover:bg-emerald-500/10 hover:text-emerald-700"
+                          }`}
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          onClick={() => handleStatusChange(b.id, "completed")}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                            b.status === "completed"
+                              ? "bg-blue-600 text-white shadow"
+                              : "bg-[#f4f1eb] text-[#101820]/70 hover:bg-blue-500/10 hover:text-blue-700"
+                          }`}
+                        >
+                          Complete
+                        </button>
+                        <button
+                          onClick={() => handleStatusChange(b.id, "cancelled")}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                            b.status === "cancelled"
+                              ? "bg-red-600 text-white shadow"
+                              : "bg-[#f4f1eb] text-[#101820]/70 hover:bg-red-500/10 hover:text-red-700"
+                          }`}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                {/* Completed exams whose patient has a consultation to follow.
+                    Admin can remove any of these from the list with the ✕. */}
+                {completedExamsWithConsultation.map((b) => {
+                  const linked = consultationForCompletedId.get(b.id);
+                  return (
+                    <div
+                      key={`exam-${b.id}`}
+                      className="bg-white border border-[#b99a6b]/40 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow flex flex-col lg:flex-row lg:items-center justify-between gap-6"
+                    >
+                      <div className="space-y-3 flex-1">
+                        <div className="flex flex-wrap items-center gap-3">
+                          {/* Completed-exam context tag */}
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-700 text-xs font-medium">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            Completed exam
+                          </span>
+                          {/* Follow-up consultation flag + remove-from-list ✕ */}
+                          <span className="inline-flex items-center gap-1 pl-3 pr-1.5 py-1 rounded-xl bg-[#b99a6b] text-[#101820] text-xs font-semibold">
+                            <Stethoscope className="w-3.5 h-3.5" />
+                            Has consultation
+                            <button
+                              onClick={() => handleSetConsultationHint(b.id, true)}
+                              title="Remove from this list"
+                              className="ml-0.5 rounded-full p-0.5 text-[#101820]/70 hover:bg-[#101820]/15 hover:text-[#101820] transition-colors"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </span>
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#f4f1eb] text-[#101820] text-xs font-medium border border-[#101820]/10">
+                            <ListFilter className="w-3.5 h-3.5 text-[#b99a6b]" />
+                            Queue #{b.queue_number ?? "—"}
+                          </span>
+                        </div>
+
+                        <div>
+                          <h3 className="font-serif text-2xl font-medium text-[#101820]">
+                            {b.full_name}
+                          </h3>
+                          <div className="flex flex-wrap items-center gap-4 text-xs text-[#101820]/60 mt-1">
+                            <span className="flex items-center gap-1.5 font-mono">
+                              <Phone className="w-3.5 h-3.5 text-[#b99a6b]" /> {b.phone}
+                            </span>
+                            {b.email && (
+                              <span className="flex items-center gap-1.5">
+                                <Mail className="w-3.5 h-3.5 text-[#101820]/40" /> {b.email}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-xs text-[#101820]/70">
+                          <span className="flex items-center gap-1.5">
+                            <FileText className="w-3.5 h-3.5 text-[#b99a6b]" /> Exam: {b.treatment}
+                          </span>
+                          <span className="flex items-center gap-1.5">
+                            <CalendarIcon className="w-3.5 h-3.5 text-[#b99a6b]" /> Exam day {b.date}
+                          </span>
+                          {linked && (
+                            <span className="flex items-center gap-1.5 text-[#b99a6b] font-medium">
+                              <Stethoscope className="w-3.5 h-3.5" /> Consultation {linked.date} · {linked.status}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap lg:flex-col items-center lg:items-end gap-2 border-t lg:border-t-0 lg:border-l border-[#101820]/10 pt-4 lg:pt-0 lg:pl-6">
+                        <div className="flex items-center gap-2 w-full justify-start lg:justify-end">
+                          <a
+                            href={`tel:${b.phone}`}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#f4f1eb] hover:bg-[#101820] hover:text-white border border-[#101820]/15 text-xs text-[#101820] transition-colors"
+                          >
+                            <PhoneCall className="w-3.5 h-3.5 text-[#b99a6b]" />
+                            <span>Call</span>
+                          </a>
+                          <a
+                            href={`https://wa.me/${b.phone.replace(/[^0-9]/g, "")}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-xs text-emerald-800 transition-colors"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>WhatsApp</span>
+                          </a>
+                          <button
+                            onClick={() => setSelectedBooking(b)}
+                            className="p-1.5 rounded-xl bg-[#f4f1eb] hover:bg-[#101820] hover:text-white border border-[#101820]/15 text-[#101820] transition-colors"
+                            title="View Full Info"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <button
+                          onClick={() => handleSetConsultationHint(b.id, true)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#f4f1eb] text-[#101820]/70 hover:bg-red-500/10 hover:text-red-700 border border-[#101820]/15 text-xs transition-colors"
+                          title="Remove this follow-up from the consultations list"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          <span>Remove from list</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── MODAL 1: VIEW BOOKING DETAILS ───────────────────────────────────── */}
@@ -1113,11 +1638,19 @@ export default function AdminPage() {
             <div className="flex items-center justify-between border-b border-[#101820]/10 pb-4">
               <div>
                 <span className="text-[0.65rem] font-medium uppercase tracking-[0.2em] text-[#b99a6b]">
-                  Appointment Details #{selectedBooking.id}
+                  {isConsultation(selectedBooking) ? "Consultation" : "Appointment"} Details #{selectedBooking.id}
                 </span>
-                <h3 className="font-serif text-xl font-medium text-[#101820] mt-0.5">
-                  {selectedBooking.full_name}
-                </h3>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <h3 className="font-serif text-xl font-medium text-[#101820]">
+                    {selectedBooking.full_name}
+                  </h3>
+                  {isConsultation(selectedBooking) && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#b99a6b] text-[#101820] text-[0.62rem] font-semibold uppercase tracking-wider">
+                      <Stethoscope className="w-3 h-3" />
+                      Consultation
+                    </span>
+                  )}
+                </div>
               </div>
               <button
                 onClick={() => setSelectedBooking(null)}
@@ -1132,7 +1665,7 @@ export default function AdminPage() {
               <div className="grid grid-cols-2 gap-4 bg-[#f4f1eb]/70 rounded-2xl p-4 border border-[#101820]/10">
                 <div>
                   <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50">
-                    Treatment
+                    Service
                   </span>
                   <span className="font-serif text-base text-[#b99a6b] font-medium">
                     {selectedBooking.treatment}
@@ -1169,10 +1702,28 @@ export default function AdminPage() {
 
                 <div>
                   <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50">
+                    Time
+                  </span>
+                  <span className="text-[#101820] font-medium">
+                    {formatEstimatedTime(selectedBooking)}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50">
                     Queue Number
                   </span>
                   <span className="text-[#101820] font-medium">
                     #{selectedBooking.queue_number ?? "—"}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50">
+                    Booked On
+                  </span>
+                  <span className="text-[#101820] font-medium">
+                    {formatCreatedAt(selectedBooking.created_at)}
                   </span>
                 </div>
 
@@ -1195,6 +1746,49 @@ export default function AdminPage() {
                   </span>
                 </div>
               </div>
+
+              {/* Completed exam whose patient has a consultation — with a
+                  yes/no toggle so it can be hidden and brought back. */}
+              {examsWithMatchedConsultation.has(selectedBooking.id) && (
+                <div
+                  className={`flex items-start gap-2 p-3.5 rounded-xl border text-xs ${
+                    selectedBooking.consultation_hint_dismissed
+                      ? "bg-[#f4f1eb] border-[#101820]/10 text-[#101820]/60"
+                      : "bg-[#b99a6b]/15 border-[#b99a6b]/40 text-[#101820]"
+                  }`}
+                >
+                  <Stethoscope
+                    className={`w-4 h-4 shrink-0 mt-0.5 ${
+                      selectedBooking.consultation_hint_dismissed ? "text-[#101820]/40" : "text-[#b99a6b]"
+                    }`}
+                  />
+                  <span className="flex-1">
+                    This patient also has a <strong className="font-semibold">consultation</strong>{" "}
+                    booked for{" "}
+                    <strong className="font-semibold">
+                      {examsWithMatchedConsultation.get(selectedBooking.id)?.date}
+                    </strong>{" "}
+                    (status: {examsWithMatchedConsultation.get(selectedBooking.id)?.status}) — it takes
+                    place after this exam.
+                    {selectedBooking.consultation_hint_dismissed && " — currently hidden from the lists."}
+                  </span>
+                  <button
+                    onClick={() =>
+                      handleSetConsultationHint(
+                        selectedBooking.id,
+                        !selectedBooking.consultation_hint_dismissed
+                      )
+                    }
+                    className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                      selectedBooking.consultation_hint_dismissed
+                        ? "bg-[#b99a6b] text-[#101820] hover:bg-[#b99a6b]/85"
+                        : "bg-white/60 border border-[#101820]/15 text-[#101820]/70 hover:bg-red-500/10 hover:text-red-700"
+                    }`}
+                  >
+                    {selectedBooking.consultation_hint_dismissed ? "Show" : "Remove"}
+                  </button>
+                </div>
+              )}
 
               {/* Contact Actions */}
               <div className="space-y-2">
@@ -1330,7 +1924,7 @@ export default function AdminPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[#101820]/60 mb-1">Treatment *</label>
+                  <label className="block text-[#101820]/60 mb-1">Service *</label>
                   <select
                     value={newForm.treatment}
                     onChange={(e) =>
@@ -1338,7 +1932,7 @@ export default function AdminPage() {
                     }
                     className="w-full bg-[#f4f1eb] border border-[#101820]/15 rounded-xl px-3 py-2 text-[#101820] outline-none focus:border-[#b99a6b]"
                   >
-                    {TREATMENT_OPTIONS.map((t) => (
+                    {SERVICE_OPTIONS.map((t) => (
                       <option key={t} value={t}>
                         {t}
                       </option>

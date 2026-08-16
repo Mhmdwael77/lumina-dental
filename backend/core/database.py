@@ -45,6 +45,14 @@ class UserRole(str, enum.Enum):
     STAFF = "staff"
 
 
+class ServiceType(str, enum.Enum):
+    """What kind of appointment this booking is. `TREATMENT` is the default
+    (any of the clinic's treatments); `CONSULTATION` is a request to see the
+    dentist for advice/assessment, shown separately in the admin dashboard."""
+    TREATMENT = "treatment"
+    CONSULTATION = "consultation"
+
+
 class PaymentMethod(str, enum.Enum):
     CLINIC = "clinic"
     ONLINE = "online"
@@ -79,6 +87,9 @@ class Booking(Base):
     phone = Column(String(30), nullable=False)
     email = Column(String(120), nullable=True)
     treatment = Column(String(80), nullable=False)
+    # Distinguishes a consultation request from a normal treatment appointment.
+    # Defaults to TREATMENT so every pre-existing booking stays a treatment.
+    service_type = Column(SAEnum(ServiceType), default=ServiceType.TREATMENT, nullable=False)
     date = Column(String(20), nullable=False)          # e.g. "2026-08-20"
     time = Column(String(20), nullable=True)            # legacy exact-time note, no longer selected by patients
     message = Column(Text, nullable=True)
@@ -90,6 +101,11 @@ class Booking(Base):
     estimated_arrival_end = Column(DateTime, nullable=True)
     patient_arrived = Column(Boolean, default=False, nullable=False)
     arrived_at = Column(DateTime, nullable=True)
+
+    # Staff dismissed the "this patient also has a consultation" reminder that
+    # is shown on a completed exam. Purely a UI hint — dismissing it never
+    # touches the consultation booking itself.
+    consultation_hint_dismissed = Column(Boolean, default=False, nullable=False)
 
     # ── Payment ───────────────────────────────────────────────────────────
     payment_method = Column(SAEnum(PaymentMethod), default=PaymentMethod.CLINIC, nullable=False)
@@ -158,8 +174,13 @@ def _migrate_missing_columns() -> None:
                     continue
                 col_type = column.type.compile(dialect=engine.dialect)
                 default_clause = ""
-                if column.name == "patient_arrived":
+                if column.name in ("patient_arrived", "consultation_hint_dismissed"):
                     default_clause = " DEFAULT 0"
+                elif column.name == "service_type":
+                    # SAEnum stores the member NAME (e.g. existing rows hold
+                    # 'PENDING'/'CLINIC'), so the backfill default must be the
+                    # uppercase name too or SQLAlchemy can't read it back.
+                    default_clause = f" DEFAULT '{ServiceType.TREATMENT.name}'"
                 elif column.name == "payment_method":
                     default_clause = f" DEFAULT '{PaymentMethod.CLINIC.value}'"
                 elif column.name == "payment_status":

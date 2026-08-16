@@ -15,6 +15,11 @@ class BookingStatusEnum(str, Enum):
     COMPLETED = "completed"
 
 
+class ServiceTypeEnum(str, Enum):
+    TREATMENT = "treatment"
+    CONSULTATION = "consultation"
+
+
 class PaymentMethodEnum(str, Enum):
     CLINIC = "clinic"
     ONLINE = "online"
@@ -45,6 +50,9 @@ class BookingCreate(BaseModel):
     phone: str = Field(..., min_length=6, max_length=30, examples=["+201001234567"])
     email: Optional[EmailStr] = Field(None, examples=["ahmed@example.com"])
     treatment: str = Field(..., min_length=2, max_length=80, examples=["Cosmetic Dentistry"])
+    # Consultation vs. treatment appointment. Optional & defaults to treatment
+    # so existing clients that don't send it keep working unchanged.
+    service_type: ServiceTypeEnum = ServiceTypeEnum.TREATMENT
     date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$", examples=["2026-08-20"])
     message: Optional[str] = Field(None, max_length=500)
     payment_method: PaymentMethodEnum = PaymentMethodEnum.CLINIC
@@ -58,6 +66,12 @@ class BookingStatusUpdate(BaseModel):
 class ArrivalUpdate(BaseModel):
     """Schema for staff/admin to mark a patient as entered / not entered."""
     arrived: bool
+
+
+class ConsultationHintUpdate(BaseModel):
+    """Staff show/hide the 'patient also has a consultation' reminder on a
+    completed exam. UI-only flag — never affects the consultation booking."""
+    dismissed: bool
 
 
 class PaymentConfirmRequest(BaseModel):
@@ -79,6 +93,7 @@ class BookingResponse(BaseModel):
     phone: str
     email: Optional[str] = None
     treatment: str
+    service_type: ServiceTypeEnum
     date: str
     time: Optional[str] = None
     message: Optional[str] = None
@@ -89,6 +104,7 @@ class BookingResponse(BaseModel):
     estimated_arrival_end: Optional[datetime] = None
     patient_arrived: bool
     arrived_at: Optional[datetime] = None
+    consultation_hint_dismissed: bool = False
 
     payment_method: PaymentMethodEnum
     payment_status: PaymentStatusEnum
@@ -107,6 +123,7 @@ class BookingPublicResponse(BaseModel):
     id: int
     full_name: str
     treatment: str
+    service_type: ServiceTypeEnum
     date: str
     status: BookingStatusEnum
 

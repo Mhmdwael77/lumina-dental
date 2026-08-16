@@ -13,10 +13,11 @@ import {
   ShieldCheck,
   Building2,
   Loader2,
+  TriangleAlert,
 } from "lucide-react";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
-import { TREATMENT_OPTIONS } from "@/lib/constants";
+import { SERVICE_OPTIONS, CONSULTATION_SERVICE } from "@/lib/constants";
 import {
   ApiError,
   Availability,
@@ -199,7 +200,7 @@ export default function BookingPage() {
       e.phone = "Please enter a valid phone number.";
     if (f.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email))
       e.email = "Please enter a valid email.";
-    if (!f.treatment) e.treatment = "Please choose a treatment.";
+    if (!f.treatment) e.treatment = "Please choose a service.";
     return e;
   };
 
@@ -220,6 +221,7 @@ export default function BookingPage() {
         phone: fields.phone,
         email: fields.email || undefined,
         treatment: fields.treatment,
+        service_type: fields.treatment === CONSULTATION_SERVICE ? "consultation" : "treatment",
         date,
         message: fields.message || undefined,
         payment_method: paymentMethod,
@@ -275,7 +277,7 @@ export default function BookingPage() {
 
   return (
     <>
-      <Navbar />
+      <Navbar minimal />
       <main className="min-h-screen w-full bg-cream px-6 pb-28 pt-32 md:px-10 md:pt-40 lg:px-14">
         <div className="mx-auto max-w-3xl">
           <p className="mb-6 flex items-center gap-3 text-[0.7rem] font-medium uppercase tracking-[0.32em] text-ink/50">
@@ -448,7 +450,7 @@ export default function BookingPage() {
 
                 <div>
                   <label htmlFor="treatment" className={labelBase}>
-                    Treatment <span className="text-gold">*</span>
+                    Service <span className="text-gold">*</span>
                   </label>
                   <select
                     id="treatment"
@@ -457,15 +459,26 @@ export default function BookingPage() {
                     className={`${inputBase} ${border("treatment")} ${fields.treatment ? "text-ink" : "text-ink/35"}`}
                   >
                     <option value="" disabled>
-                      Select a treatment
+                      Select a service
                     </option>
-                    {TREATMENT_OPTIONS.map((t) => (
+                    {SERVICE_OPTIONS.map((t) => (
                       <option key={t} value={t} className="text-ink">
                         {t}
                       </option>
                     ))}
                   </select>
                   {err("treatment")}
+                  {fields.treatment === CONSULTATION_SERVICE && (
+                    <p className="mt-2 flex items-start gap-1.5 rounded-lg border border-gold/30 bg-gold/10 px-3 py-2 text-xs leading-relaxed text-ink/70">
+                      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gold" />
+                      <span>
+                        You&apos;re requesting a{" "}
+                        <strong className="font-medium text-ink">consultation</strong> — a visit to
+                        discuss your needs with the dentist. You&apos;ll still receive a queue number
+                        and arrival window like any other appointment.
+                      </span>
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -645,7 +658,7 @@ export default function BookingPage() {
                     <span className="font-serif text-base font-medium text-ink">{formatDateLong(confirmation.date)}</span>
                   </div>
                   <div>
-                    <span className="block text-[0.62rem] uppercase tracking-wider text-ink/40">Treatment</span>
+                    <span className="block text-[0.62rem] uppercase tracking-wider text-ink/40">Service</span>
                     <span className="font-serif text-base font-medium text-ink">{confirmation.treatment}</span>
                   </div>
                   <div>
@@ -722,6 +735,24 @@ export default function BookingPage() {
               Bookings follow the clinic&apos;s working days
               {schedule ? ` (${schedule.booking_window_days}-day booking window)` : ""}.
             </p>
+          )}
+
+          {/* Single exit out of the focused booking flow. Hidden once the
+              booking is confirmed — at that point leaving cancels nothing. */}
+          {step !== "confirmed" && (
+            <div className="mt-10 border-t border-ink/10 pt-6">
+              <p className="flex items-start gap-2 text-xs leading-relaxed text-[#a83b2d]">
+                <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                Heads up — going back to the homepage will cancel this booking and
+                clear the details you&apos;ve entered so far.
+              </p>
+              <Link
+                href="/"
+                className="mt-4 inline-flex items-center gap-2 rounded-full border border-ink/15 px-6 py-3.5 text-xs font-medium uppercase tracking-[0.2em] text-ink/70 transition-colors hover:border-ink/30 hover:text-ink"
+              >
+                <ArrowLeft className="h-4 w-4" /> Back to Home
+              </Link>
+            </div>
           )}
         </div>
       </main>

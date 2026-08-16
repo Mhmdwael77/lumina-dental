@@ -13,6 +13,7 @@ from fastapi import HTTPException, status
 
 from core.crud.booking import (
     create_booking_with_queue_number,
+    find_active_booking_for_phone,
     count_active_bookings_for_date,
     count_patients_ahead,
     get_currently_serving,
@@ -21,13 +22,14 @@ from core.crud.booking import (
     get_bookings_for_date,
     update_booking_status as crud_update_status,
     set_arrival as crud_set_arrival,
+    set_consultation_hint_dismissed as crud_set_hint,
     set_payment_paid as crud_set_payment_paid,
     delete_booking as crud_delete,
 )
-from core.database import Booking, BookingStatus, PaymentMethod, PaymentStatus
+from core.database import Booking, BookingStatus, PaymentMethod, PaymentStatus, ServiceType
 from core.clinic_schedule import get_working_hours, is_working_day, is_within_working_hours
 from core.config import settings
-from schemas.booking import BookingCreate, BookingStatusUpdate
+from schemas.booking import BookingCreate, BookingStatusUpdate, ServiceTypeEnum
 
 # Treatments must match the frontend constants
 VALID_TREATMENTS = {
@@ -38,6 +40,10 @@ VALID_TREATMENTS = {
     "General Dentistry",
     "Pediatric Dentistry",
 }
+
+# The `treatment` label stored for consultation bookings (they reuse the same
+# form and queue system — the service type is what distinguishes them).
+CONSULTATION_LABEL = "Consultation"
 
 WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
@@ -128,11 +134,37 @@ def get_availability(db: Session, date_str: str):
 def validate_and_create_booking(db: Session, data: BookingCreate) -> Booking:
     """Validate business rules then persist a new booking with a
     backend-assigned, per-day-unique queue number."""
-    if data.treatment not in VALID_TREATMENTS:
+    # One active booking per patient (matched by phone): block a new booking
+    # while this phone still has a pending/confirmed one — this is what stops a
+    # patient going back to the home page and booking over and over. Completed
+    # or cancelled bookings don't count, so they can book again afterwards.
+    existing = find_active_booking_for_phone(db, data.phone)
+    if existing is not None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Unknown treatment '{data.treatment}'. Choose from: {', '.join(sorted(VALID_TREATMENTS))}",
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"This phone number already has an active booking "
+                f"(queue #{existing.queue_number} on {existing.date}). "
+                f"You can only have one active booking at a time — please wait "
+                f"until it's completed, or cancel it, before booking again."
+            ),
         )
+
+    # A consultation reuses the whole booking flow — only its service type and
+    # its stored `treatment` label differ. For treatment appointments we keep
+    # enforcing the existing allow-list unchanged.
+    is_consultation = data.service_type == ServiceTypeEnum.CONSULTATION
+    if is_consultation:
+        treatment_value = CONSULTATION_LABEL
+        service_type = ServiceType.CONSULTATION
+    else:
+        if data.treatment not in VALID_TREATMENTS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Unknown treatment '{data.treatment}'. Choose from: {', '.join(sorted(VALID_TREATMENTS))}",
+            )
+        treatment_value = data.treatment
+        service_type = ServiceType.TREATMENT
 
     booking_date = _parse_date(data.date)
     today = date.today()
@@ -177,7 +209,8 @@ def validate_and_create_booking(db: Session, data: BookingCreate) -> Booking:
         full_name=data.full_name,
         phone=data.phone,
         email=data.email,
-        treatment=data.treatment,
+        treatment=treatment_value,
+        service_type=service_type,
         date=data.date,
         time=None,
         message=data.message,
@@ -192,6 +225,7 @@ def booking_to_public_response(db: Session, booking: Booking) -> dict:
         "id": booking.id,
         "full_name": booking.full_name,
         "treatment": booking.treatment,
+        "service_type": booking.service_type,
         "date": booking.date,
         "status": booking.status,
         "queue_number": booking.queue_number,
@@ -275,6 +309,13 @@ def mark_arrival(db: Session, booking_id: int, arrived: bool) -> Booking:
             )
 
     return crud_set_arrival(db, booking_id, arrived)
+
+
+def set_consultation_hint(db: Session, booking_id: int, dismissed: bool) -> Booking:
+    booking = crud_set_hint(db, booking_id, dismissed)
+    if booking is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+    return booking
 
 
 def change_booking_status(db: Session, booking_id: int, update: BookingStatusUpdate):

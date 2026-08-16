@@ -6,6 +6,7 @@
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export type BookingStatus = "pending" | "confirmed" | "completed" | "cancelled";
+export type ServiceType = "treatment" | "consultation";
 export type PaymentMethod = "clinic" | "online";
 export type PaymentStatus = "pending" | "paid" | "failed";
 export type ReminderStatus = "pending" | "sent" | "failed" | "not_applicable";
@@ -16,6 +17,7 @@ export interface Booking {
   phone: string;
   email?: string | null;
   treatment: string;
+  service_type?: ServiceType;
   date: string;
   time?: string | null;
   message?: string | null;
@@ -25,6 +27,7 @@ export interface Booking {
   estimated_arrival_end?: string | null;
   patient_arrived: boolean;
   arrived_at?: string | null;
+  consultation_hint_dismissed?: boolean;
   payment_method: PaymentMethod;
   payment_status: PaymentStatus;
   reminder_status: ReminderStatus;
@@ -37,6 +40,7 @@ export interface BookingConfirmation {
   id: number;
   full_name: string;
   treatment: string;
+  service_type?: ServiceType;
   date: string;
   status: BookingStatus;
   queue_number: number;
@@ -84,6 +88,7 @@ export interface BookingCreateData {
   phone: string;
   email?: string;
   treatment: string;
+  service_type?: ServiceType;
   date: string;
   message?: string;
   payment_method: PaymentMethod;
@@ -183,8 +188,15 @@ export async function fetchBookings(token: string): Promise<Booking[]> {
     if (res.ok) {
       return await res.json();
     }
-  } catch {
-    // Backend offline fallback
+    // Backend reached but rejected us. An expired/invalid session must NOT be
+    // swallowed into an empty demo list — that makes real data look deleted.
+    // Surface it so the dashboard can send the user back to sign in.
+    if (res.status === 401 || res.status === 403) {
+      throw new ApiError("Your session has expired. Please sign in again.", res.status);
+    }
+  } catch (err) {
+    if (err instanceof ApiError) throw err; // re-raise auth errors
+    // Otherwise it's a network error → fall through to the offline demo store.
   }
 
   // Return stored local/demo bookings if backend offline
@@ -307,6 +319,41 @@ export async function updateArrivalStatus(token: string, bookingId: number, arri
   });
   if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not update arrival status."), res.status);
   return res.json();
+}
+
+/**
+ * Show/hide the "patient also has a consultation" reminder shown on a
+ * completed exam. UI-only flag — it never changes the consultation booking.
+ * Falls back to the local demo store when the backend is offline, mirroring
+ * updateBookingStatus so the dismissal still sticks in demo mode.
+ */
+export async function updateConsultationHintDismissed(
+  token: string,
+  bookingId: number,
+  dismissed: boolean
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/bookings/${bookingId}/consultation-hint`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ dismissed }),
+    });
+    if (res.ok) return true;
+  } catch {
+    // fall through to local fallback
+  }
+
+  if (typeof window !== "undefined") {
+    const current = await fetchBookings(token);
+    const updated = current.map((b) =>
+      b.id === bookingId ? { ...b, consultation_hint_dismissed: dismissed } : b
+    );
+    localStorage.setItem("lumina_demo_bookings", JSON.stringify(updated));
+  }
+  return true;
 }
 
 /** Delete a booking */

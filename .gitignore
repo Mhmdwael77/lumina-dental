@@ -21,3 +21,18 @@ backend/env/
 *.log
 .vscode/
 .idea/
+
+# Catch-all for build/runtime artifacts anywhere in the tree (also covers the
+# repo root, not just the frontend/ and backend/ subfolders above).
+node_modules/
+.next/
+out/
+build/
+.venv/
+venv/
+env/
+next-env.d.ts
+*.tsbuildinfo
+# SQLite runtime databases hold live patient data — never commit them.
+*.db
+*.sqlite3

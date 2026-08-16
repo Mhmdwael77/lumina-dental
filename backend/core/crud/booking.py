@@ -2,6 +2,8 @@
 Database query helpers for bookings.
 """
 
+import re
+
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -16,8 +18,39 @@ from core.database import Booking, BookingStatus
 ACTIVE_STATUSES = (BookingStatus.PENDING, BookingStatus.CONFIRMED, BookingStatus.COMPLETED)
 
 # A booking still occupies a place *ahead* of others only while it hasn't
-# been completed (served) or cancelled (no-show/skip) yet.
+# been completed (served) or cancelled (no-show/skip) yet. This is also the
+# set that counts as an "outstanding" booking for the one-active-per-phone rule.
 STILL_WAITING_STATUSES = (BookingStatus.PENDING, BookingStatus.CONFIRMED)
+
+
+def _digits(phone: str | None) -> str:
+    return re.sub(r"\D", "", phone or "")
+
+
+def _phones_match(a: str | None, b: str | None) -> bool:
+    """Same patient? Tolerant of country-code / leading-zero formatting
+    (e.g. '01552007412' vs '+201552007412') by matching on a common suffix."""
+    x, y = _digits(a), _digits(b)
+    if len(x) < 7 or len(y) < 7:
+        return False
+    return x == y or x.endswith(y) or y.endswith(x)
+
+
+def find_active_booking_for_phone(db: Session, phone: str) -> Booking | None:
+    """Return this phone's outstanding (pending/confirmed) booking, if any —
+    used to enforce one active booking per patient. Completed and cancelled
+    bookings don't count, so a patient can book again once their current
+    appointment is finished. Filtering is done in Python so the match is
+    tolerant of phone formatting; the active set is small in practice."""
+    outstanding = (
+        db.query(Booking)
+        .filter(Booking.status.in_(STILL_WAITING_STATUSES))
+        .all()
+    )
+    for booking in outstanding:
+        if _phones_match(booking.phone, phone):
+            return booking
+    return None
 
 MAX_QUEUE_ASSIGN_ATTEMPTS = 8
 
@@ -144,6 +177,16 @@ def set_arrival(db: Session, booking_id: int, arrived: bool) -> Booking | None:
         return None
     booking.patient_arrived = arrived
     booking.arrived_at = datetime.utcnow() if arrived else None
+    db.commit()
+    db.refresh(booking)
+    return booking
+
+
+def set_consultation_hint_dismissed(db: Session, booking_id: int, dismissed: bool) -> Booking | None:
+    booking = get_booking(db, booking_id)
+    if booking is None:
+        return None
+    booking.consultation_hint_dismissed = dismissed
     db.commit()
     db.refresh(booking)
     return booking

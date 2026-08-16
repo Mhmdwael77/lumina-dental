@@ -27,6 +27,7 @@ from schemas.booking import (
     BookingPublicResponse,
     QueueStatusResponse,
     ArrivalUpdate,
+    ConsultationHintUpdate,
     PaymentConfirmRequest,
 )
 from services.booking_service import (
@@ -35,6 +36,7 @@ from services.booking_service import (
     get_queue_status,
     confirm_online_payment,
     mark_arrival,
+    set_consultation_hint,
     list_bookings,
     get_single_booking,
     change_booking_status,
@@ -131,6 +133,20 @@ def update_arrival(
     _: User = Depends(require_staff),
 ):
     return mark_arrival(db, booking_id, body.arrived)
+
+
+@router.patch(
+    "/{booking_id}/consultation-hint",
+    response_model=BookingResponse,
+    summary="Show/hide the 'has consultation' reminder on a completed exam (staff)",
+)
+def update_consultation_hint(
+    booking_id: int,
+    body: ConsultationHintUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_staff),
+):
+    return set_consultation_hint(db, booking_id, body.dismissed)
 
 
 @router.post(
