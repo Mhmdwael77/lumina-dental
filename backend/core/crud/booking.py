@@ -52,6 +52,15 @@ def find_active_booking_for_phone(db: Session, phone: str) -> Booking | None:
             return booking
     return None
 
+def get_bookings_by_phone(db: Session, phone: str) -> list[Booking]:
+    """Every booking belonging to this phone number, newest first — the
+    patient's full record. Phone is the identity key (patients have no
+    account), tolerant of country-code / leading-zero formatting, matching
+    `find_active_booking_for_phone` above."""
+    all_bookings = db.query(Booking).order_by(Booking.date.desc()).all()
+    return [b for b in all_bookings if _phones_match(b.phone, phone)]
+
+
 MAX_QUEUE_ASSIGN_ATTEMPTS = 8
 
 

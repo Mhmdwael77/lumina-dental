@@ -25,6 +25,7 @@ from core.crud.booking import (
     set_consultation_hint_dismissed as crud_set_hint,
     set_payment_paid as crud_set_payment_paid,
     set_extra_charge as crud_set_extra_charge,
+    get_bookings_by_phone as crud_get_by_phone,
     delete_booking as crud_delete,
 )
 from core.database import Booking, BookingStatus, PaymentMethod, PaymentStatus, ServiceType
@@ -349,3 +350,10 @@ def get_single_booking(db: Session, booking_id: int):
     if booking is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
     return booking
+
+
+def get_patient_bookings(db: Session, phone: str) -> list[Booking]:
+    """A patient's full record, pulled by phone — the identity key, since
+    patients have no account. Not paginated: unlike the staff list endpoint,
+    this must never silently drop a patient's older visits."""
+    return crud_get_by_phone(db, phone)

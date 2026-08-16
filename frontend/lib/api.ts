@@ -178,6 +178,22 @@ export async function loginAdmin(username: string, password: string): Promise<st
   }
 }
 
+/**
+ * Full booking history for a patient, pulled by phone number — the
+ * identity key, since patients have no account. Unlike `fetchBookings`,
+ * this is never paginated and never silently caps out, so it's the
+ * authoritative source for the Patient Record modal (not a client-side
+ * filter over whatever page of `fetchBookings` happens to be loaded).
+ */
+export async function fetchPatientBookings(token: string, phone: string): Promise<Booking[]> {
+  const res = await fetch(`${API_BASE_URL}/bookings/patient/${encodeURIComponent(phone)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not load this patient's record."), res.status);
+  return res.json();
+}
+
 /** Fetch all bookings from backend (or fallback) */
 export async function fetchBookings(token: string): Promise<Booking[]> {
   try {

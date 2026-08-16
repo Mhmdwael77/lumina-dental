@@ -41,6 +41,7 @@ from services.booking_service import (
     set_extra_charge,
     list_bookings,
     get_single_booking,
+    get_patient_bookings,
     change_booking_status,
     remove_booking,
 )
@@ -94,6 +95,19 @@ def list_all_bookings(
     _: User = Depends(require_staff),
 ):
     return list_bookings(db, skip=skip, limit=limit, status_filter=status_filter, date=date)
+
+
+@router.get(
+    "/patient/{phone}",
+    response_model=list[BookingResponse],
+    summary="Full booking history for a patient, pulled by phone number (staff)",
+)
+def get_patient_bookings_endpoint(
+    phone: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_staff),
+):
+    return get_patient_bookings(db, phone)
 
 
 @router.get(

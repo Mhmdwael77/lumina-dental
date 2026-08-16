@@ -43,6 +43,7 @@ import {
   loginAdmin,
   removeToken,
   fetchBookings,
+  fetchPatientBookings,
   updateBookingStatus,
   updateArrivalStatus,
   updateConsultationHintDismissed,
@@ -55,6 +56,59 @@ import { TREATMENT_OPTIONS, SERVICE_OPTIONS, CONSULTATION_SERVICE } from "@/lib/
 
 /** A booking is a consultation when the backend tagged its service type. */
 const isConsultation = (b: Booking) => b.service_type === "consultation";
+
+/** Month select options, English label with the Arabic name in parens. */
+const MONTH_NAMES = [
+  { value: "01", label: "January (يناير)" },
+  { value: "02", label: "February (فبراير)" },
+  { value: "03", label: "March (مارس)" },
+  { value: "04", label: "April (أبريل)" },
+  { value: "05", label: "May (مايو)" },
+  { value: "06", label: "June (يونيو)" },
+  { value: "07", label: "July (يوليو)" },
+  { value: "08", label: "August (أغسطس)" },
+  { value: "09", label: "September (سبتمبر)" },
+  { value: "10", label: "October (أكتوبر)" },
+  { value: "11", label: "November (نوفمبر)" },
+  { value: "12", label: "December (ديسمبر)" },
+];
+
+/**
+ * Local calendar date as YYYY-MM-DD. `Date#toISOString()` reports the UTC
+ * date, which drifts a day off from the local calendar near midnight in any
+ * timezone ahead of UTC (e.g. Egypt, UTC+2/+3) — that mismatch is what made
+ * "Today" land on the wrong day.
+ */
+const toLocalIso = (date: Date = new Date()): string => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
+
+/**
+ * Let a plain mouse wheel page a horizontally-scrolling pill strip sideways.
+ * React attaches its synthetic onWheel as a passive listener, so
+ * preventDefault() there is silently ignored by the browser and the page
+ * scrolls vertically at the same time — a native, explicitly non-passive
+ * listener is required to actually suppress that page scroll. `active`
+ * gates it to only the currently-visible strip (the ref's element doesn't
+ * exist while its tab is hidden).
+ */
+function useWheelHorizontalScroll(ref: React.RefObject<HTMLDivElement | null>, active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    const container = ref.current;
+    if (!container) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY === 0) return;
+      e.preventDefault();
+      container.scrollLeft += e.deltaY;
+    };
+    container.addEventListener("wheel", onWheel, { passive: false });
+    return () => container.removeEventListener("wheel", onWheel);
+  }, [ref, active]);
+}
 
 /** Digits only, for tolerant phone comparison. */
 const digitsOf = (s?: string | null) => (s || "").replace(/\D/g, "");
@@ -120,45 +174,67 @@ export default function AdminPage() {
   const [viewMode, setViewMode] = useState<"agenda" | "table" | "consultations">("agenda");
 
   // Selected Date for Agenda View (YYYY-MM-DD)
-  const [selectedDate, setSelectedDate] = useState<string>(
-    new Date().toISOString().split("T")[0]
-  );
+  const [selectedDate, setSelectedDate] = useState<string>(toLocalIso());
+
+  // First day shown in the Day Agenda's 7-day pill strip — a rolling window
+  // that starts on today by default. Independent from `selectedDate` so
+  // picking a day mid-strip doesn't reshuffle which 7 days are visible; only
+  // the arrow buttons move this.
+  const [weekAnchor, setWeekAnchor] = useState<string>(toLocalIso());
 
   // Month & Year Filter States (for reviewing past month/year records)
   const [selectedMonth, setSelectedMonth] = useState<string>("all"); // "all", "01".."12"
   const [selectedYear, setSelectedYear] = useState<string>("all");   // "all", "2024".."2027"
   const [datePreset, setDatePreset] = useState<string>("all");       // "all", "today", "this_month", "last_month", "this_year"
 
+  // All Bookings table: once a specific month + year are picked, this narrows
+  // further to one day of that month (click a day pill to filter, click it
+  // again to go back to the whole month).
+  const [selectedTableDay, setSelectedTableDay] = useState<string | null>(null);
+
   // Refresh feedback state
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshToast, setRefreshToast] = useState(false);
 
-  // Day Agenda horizontal pill bar — lets us page with the arrow buttons and
-  // auto-scroll to keep the selected day in view.
+  // Day Agenda week pill bar — shows 7 days starting at `weekAnchor`; the
+  // arrow buttons page the whole window forward/back a week, and jump the
+  // active day to the new window's first day so the highlighted pill and
+  // the visible strip never fall out of sync.
   const dayPillsScrollRef = useRef<HTMLDivElement>(null);
-  const scrollDayPills = (direction: "left" | "right") => {
-    const container = dayPillsScrollRef.current;
-    if (!container) return;
-    const amount = container.clientWidth * 0.6 * (direction === "left" ? -1 : 1);
-    container.scrollBy({ left: amount, behavior: "smooth" });
+  const shiftWeek = (direction: "prev" | "next") => {
+    const [y, m, d] = weekAnchor.split("-").map(Number);
+    const date = new Date(y, m - 1, d);
+    date.setDate(date.getDate() + (direction === "prev" ? -7 : 7));
+    const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    setWeekAnchor(iso);
+    setSelectedDate(iso);
   };
 
-  // Let a plain mouse wheel page the day pills sideways. React attaches its
-  // synthetic onWheel as a passive listener, so preventDefault() there is
-  // silently ignored by the browser and the page scrolls vertically at the
-  // same time — a native, explicitly non-passive listener is required to
-  // actually suppress that page scroll.
-  useEffect(() => {
-    const container = dayPillsScrollRef.current;
-    if (!container) return;
-    const onWheel = (e: WheelEvent) => {
-      if (e.deltaY === 0) return;
-      e.preventDefault();
-      container.scrollLeft += e.deltaY;
-    };
-    container.addEventListener("wheel", onWheel, { passive: false });
-    return () => container.removeEventListener("wheel", onWheel);
-  }, [viewMode]);
+  useWheelHorizontalScroll(dayPillsScrollRef, viewMode === "agenda");
+
+  // All Bookings table: day-pill strip for the selected month/year.
+  const tableDayPillsScrollRef = useRef<HTMLDivElement>(null);
+  useWheelHorizontalScroll(tableDayPillsScrollRef, viewMode === "table");
+
+  const tableDaysPills = useMemo(() => {
+    if (selectedMonth === "all" || selectedYear === "all") return [];
+    const year = parseInt(selectedYear, 10);
+    const month = parseInt(selectedMonth, 10) - 1;
+    const totalDays = new Date(year, month + 1, 0).getDate();
+    const todayIso = toLocalIso();
+    const result = [];
+
+    for (let day = 1; day <= totalDays; day++) {
+      const dateObj = new Date(year, month, day);
+      result.push({
+        iso: toLocalIso(dateObj),
+        day,
+        dayName: dateObj.toLocaleDateString("en-US", { weekday: "short" }),
+        isToday: toLocalIso(dateObj) === todayIso,
+      });
+    }
+    return result;
+  }, [selectedMonth, selectedYear]);
 
   // Dashboard data state
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -171,6 +247,14 @@ export default function AdminPage() {
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  // Patient Record modal: the selected patient's full visit history, pulled
+  // from the backend by phone number (not filtered client-side out of
+  // whatever page of `bookings` happens to be loaded — phone is the
+  // authoritative identity key, and this must never miss older visits).
+  const [patientVisits, setPatientVisits] = useState<Booking[]>([]);
+  const [isLoadingPatientVisits, setIsLoadingPatientVisits] = useState(false);
+  const [patientVisitsError, setPatientVisitsError] = useState("");
 
   // New booking form state (queue number is assigned automatically by the backend)
   const [newForm, setNewForm] = useState<{
@@ -185,7 +269,7 @@ export default function AdminPage() {
     phone: "",
     email: "",
     treatment: TREATMENT_OPTIONS[0],
-    date: new Date().toISOString().split("T")[0],
+    date: toLocalIso(),
     message: "",
   });
   const [newFormError, setNewFormError] = useState("");
@@ -237,6 +321,41 @@ export default function AdminPage() {
     }
   };
 
+  // Pull the selected patient's full record by phone whenever the Patient
+  // Record modal opens for a (possibly different) booking.
+  useEffect(() => {
+    if (!selectedBooking) return;
+    let cancelled = false;
+    setIsLoadingPatientVisits(true);
+    setPatientVisitsError("");
+    fetchPatientBookings(token || "", selectedBooking.phone)
+      .then((visits) => {
+        if (!cancelled) setPatientVisits(visits);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setPatientVisitsError(
+            err instanceof ApiError ? err.message : "Could not load this patient's record."
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingPatientVisits(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBooking?.id, selectedBooking?.phone, token]);
+
+  // Keep every place a booking is shown in sync after a mutation: the main
+  // list, the currently open Patient Record modal's history, and the
+  // selected booking itself (if any of those currently reference it).
+  const applyBookingUpdate = (updated: Booking) => {
+    setBookings((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
+    setPatientVisits((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
+    setSelectedBooking((prev) => (prev && prev.id === updated.id ? updated : prev));
+  };
+
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     await loadBookings();
@@ -269,14 +388,17 @@ export default function AdminPage() {
     setBookings([]);
   };
 
+  // A booking as currently known locally, wherever it's cached — the main
+  // list, the open Patient Record modal's history, or the selected booking
+  // itself — used to build an optimistic update before the server confirms.
+  const findKnownBooking = (id: number): Booking | undefined =>
+    bookings.find((b) => b.id === id) ||
+    patientVisits.find((b) => b.id === id) ||
+    (selectedBooking?.id === id ? selectedBooking : undefined);
+
   const handleStatusChange = async (bookingId: number, newStatus: BookingStatus) => {
-    // Optimistic UI update
-    setBookings((prev) =>
-      prev.map((b) => (b.id === bookingId ? { ...b, status: newStatus } : b))
-    );
-    if (selectedBooking && selectedBooking.id === bookingId) {
-      setSelectedBooking((prev) => (prev ? { ...prev, status: newStatus } : null));
-    }
+    const current = findKnownBooking(bookingId);
+    if (current) applyBookingUpdate({ ...current, status: newStatus }); // Optimistic
 
     try {
       await updateBookingStatus(token || "", bookingId, newStatus);
@@ -291,6 +413,7 @@ export default function AdminPage() {
     try {
       await deleteBooking(token || "", bookingId);
       setBookings((prev) => prev.filter((b) => b.id !== bookingId));
+      setPatientVisits((prev) => prev.filter((b) => b.id !== bookingId));
       if (selectedBooking?.id === bookingId) {
         setSelectedBooking(null);
       }
@@ -341,7 +464,7 @@ export default function AdminPage() {
     }
   };
 
-  const todayIso = () => new Date().toISOString().split("T")[0];
+  const todayIso = () => toLocalIso();
 
   const canMarkEntered = (b: Booking) => b.date === todayIso() && b.status !== "cancelled";
 
@@ -351,8 +474,7 @@ export default function AdminPage() {
     const nextArrived = !b.patient_arrived;
     try {
       const updated = await updateArrivalStatus(token || "", b.id, nextArrived);
-      setBookings((prev) => prev.map((x) => (x.id === b.id ? updated : x)));
-      if (selectedBooking?.id === b.id) setSelectedBooking(updated);
+      applyBookingUpdate(updated);
     } catch (err) {
       setArrivalError(
         err instanceof ApiError ? err.message : "Could not update arrival status."
@@ -367,12 +489,8 @@ export default function AdminPage() {
   // (the memo reflects it → badge appears/vanishes), then persists; rolls back
   // by refetching on failure.
   const handleSetConsultationHint = async (bookingId: number, dismissed: boolean) => {
-    setBookings((prev) =>
-      prev.map((b) => (b.id === bookingId ? { ...b, consultation_hint_dismissed: dismissed } : b))
-    );
-    if (selectedBooking?.id === bookingId) {
-      setSelectedBooking((prev) => (prev ? { ...prev, consultation_hint_dismissed: dismissed } : prev));
-    }
+    const current = findKnownBooking(bookingId);
+    if (current) applyBookingUpdate({ ...current, consultation_hint_dismissed: dismissed });
     try {
       await updateConsultationHintDismissed(token || "", bookingId, dismissed);
     } catch {
@@ -412,8 +530,7 @@ export default function AdminPage() {
         description: extraChargeDraft.description.trim() || undefined,
         paid: extraChargeDraft.paid,
       });
-      setBookings((prev) => prev.map((b) => (b.id === bookingId ? updated : b)));
-      if (selectedBooking?.id === bookingId) setSelectedBooking(updated);
+      applyBookingUpdate(updated);
       setEditingExtraChargeId(null);
     } catch (err) {
       setExtraChargeError(err instanceof ApiError ? err.message : "Could not save the extra charge.");
@@ -431,8 +548,7 @@ export default function AdminPage() {
         description: undefined,
         paid: false,
       });
-      setBookings((prev) => prev.map((b) => (b.id === bookingId ? updated : b)));
-      if (selectedBooking?.id === bookingId) setSelectedBooking(updated);
+      applyBookingUpdate(updated);
       setEditingExtraChargeId(null);
     } catch (err) {
       setExtraChargeError(err instanceof ApiError ? err.message : "Could not remove the extra charge.");
@@ -554,54 +670,51 @@ export default function AdminPage() {
     );
   };
 
-  // Derived selected Year & Month for the Day Agenda View
-  const selectedYearNum = useMemo(() => {
-    try {
-      return parseInt(selectedDate.split("-")[0], 10) || new Date().getFullYear();
-    } catch {
-      return new Date().getFullYear();
-    }
-  }, [selectedDate]);
-
-  const selectedMonthNum = useMemo(() => {
-    try {
-      return parseInt(selectedDate.split("-")[1], 10) - 1 || new Date().getMonth();
-    } catch {
-      return new Date().getMonth();
-    }
-  }, [selectedDate]);
-
-  // Compute ALL DAYS OF THE ENTIRE MONTH for the Agenda View day picker bar (1..30/31)
-  const monthDaysPills = useMemo(() => {
-    const year = selectedYearNum;
-    const month = selectedMonthNum;
-    const totalDays = new Date(year, month + 1, 0).getDate();
-    const todayIso = new Date().toISOString().split("T")[0];
+  // The 10 days around `weekAnchor` — 3 days before it plus the 7 from it
+  // onward — so staff can glance back at recent days without paging. The
+  // day matching `weekAnchor` reads as "Today" / the one after it as
+  // "Tomorrow" when the anchor is actually today; every other day shows its
+  // short weekday name.
+  const weekDaysPills = useMemo(() => {
+    const [ay, am, ad] = weekAnchor.split("-").map(Number);
+    const anchorDate = new Date(ay, am - 1, ad);
+    const todayIso = toLocalIso();
+    const tomorrowDate = new Date();
+    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+    const tomorrowIso = toLocalIso(tomorrowDate);
     const result = [];
 
-    for (let day = 1; day <= totalDays; day++) {
-      const dateObj = new Date(year, month, day);
-      const mm = (month + 1).toString().padStart(2, "0");
-      const dd = day.toString().padStart(2, "0");
-      const iso = `${year}-${mm}-${dd}`;
+    for (let i = -3; i < 7; i++) {
+      const dateObj = new Date(anchorDate);
+      dateObj.setDate(anchorDate.getDate() + i);
+      const iso = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, "0")}-${String(dateObj.getDate()).padStart(2, "0")}`;
 
-      const dayName = dateObj.toLocaleDateString("en-US", { weekday: "short" });
-      const dayNameAr = dateObj.toLocaleDateString("ar-EG", { weekday: "short" });
-      const isToday = iso === todayIso;
+      const label =
+        iso === todayIso ? "Today" : iso === tomorrowIso ? "Tomorrow" : dateObj.toLocaleDateString("en-US", { weekday: "short" });
 
       result.push({
         iso,
-        day,
-        dayName,
-        dayNameAr,
-        isToday,
+        dateLabel: dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        dayLabel: label,
+        dayNameAr: dateObj.toLocaleDateString("ar-EG", { weekday: "short" }),
+        isToday: iso === todayIso,
       });
     }
     return result;
-  }, [selectedYearNum, selectedMonthNum]);
+  }, [weekAnchor]);
+
+  // "Aug 16 – Aug 22, 2026" label for the week header.
+  const weekRangeLabel = useMemo(() => {
+    const first = weekDaysPills[0];
+    const last = weekDaysPills[weekDaysPills.length - 1];
+    if (!first || !last) return "";
+    const [fy] = first.iso.split("-").map(Number);
+    const [ly] = last.iso.split("-").map(Number);
+    return `${first.dateLabel} – ${last.dateLabel}, ${fy === ly ? ly : `${fy}/${ly}`}`;
+  }, [weekDaysPills]);
 
   // Keep the selected day's pill in view whenever it changes (date picker,
-  // month switch, or a click elsewhere) instead of leaving staff to hunt for
+  // week switch, or a click elsewhere) instead of leaving staff to hunt for
   // it by hand in the horizontal scroller.
   useEffect(() => {
     const container = dayPillsScrollRef.current;
@@ -610,7 +723,7 @@ export default function AdminPage() {
       `[data-iso="${selectedDate}"]`
     );
     selectedPill?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-  }, [selectedDate, monthDaysPills]);
+  }, [selectedDate, weekDaysPills]);
 
   // Filtered Bookings for the selected day in Agenda View (with search support)
   const agendaBookings = useMemo(() => {
@@ -649,38 +762,15 @@ export default function AdminPage() {
     return Array.from(years).sort((a, b) => b.localeCompare(a));
   }, [bookings]);
 
-  const MONTH_NAMES = [
-    { value: "01", label: "January (يناير)" },
-    { value: "02", label: "February (فبراير)" },
-    { value: "03", label: "March (مارس)" },
-    { value: "04", label: "April (أبريل)" },
-    { value: "05", label: "May (مايو)" },
-    { value: "06", label: "June (يونيو)" },
-    { value: "07", label: "July (يوليو)" },
-    { value: "08", label: "August (أغسطس)" },
-    { value: "09", label: "September (سبتمبر)" },
-    { value: "10", label: "October (أكتوبر)" },
-    { value: "11", label: "November (نوفمبر)" },
-    { value: "12", label: "December (ديسمبر)" },
-  ];
-
-  // All bookings for the selected patient when Eye icon is clicked
-  const selectedPatientVisits = useMemo(() => {
-    if (!selectedBooking) return [];
-    return bookings
-      .filter((b) => phonesMatch(b.phone, selectedBooking.phone) || (b.email && selectedBooking.email && b.email.toLowerCase() === selectedBooking.email.toLowerCase()))
-      .sort((a, b) => b.date.localeCompare(a.date));
-  }, [bookings, selectedBooking]);
-
   // Filtered & Searched Bookings list for Table View & Month/Year Scope
   const filteredBookings = useMemo(() => {
     const now = new Date();
-    const currentIso = now.toISOString().split("T")[0];
+    const currentIso = toLocalIso(now);
     const currentYearMonth = currentIso.substring(0, 7);
     const currentYear = currentIso.substring(0, 4);
 
     const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const prevYearMonth = prevDate.toISOString().split("T")[0].substring(0, 7);
+    const prevYearMonth = toLocalIso(prevDate).substring(0, 7);
 
     return bookings.filter((b) => {
       // Status filter
@@ -712,6 +802,9 @@ export default function AdminPage() {
       const matchesYear =
         selectedYear === "all" ? true : b.date.substring(0, 4) === selectedYear;
 
+      // Specific day within the selected month/year (day-pill strip)
+      const matchesTableDay = !selectedTableDay || b.date === selectedTableDay;
+
       // Date scope presets
       let matchesPreset = true;
       if (datePreset === "today") {
@@ -724,9 +817,9 @@ export default function AdminPage() {
         matchesPreset = b.date.substring(0, 4) === currentYear;
       }
 
-      return matchesStatus && matchesQuery && matchesMonth && matchesYear && matchesPreset;
+      return matchesStatus && matchesQuery && matchesMonth && matchesYear && matchesTableDay && matchesPreset;
     });
-  }, [bookings, statusFilter, searchQuery, selectedMonth, selectedYear, datePreset]);
+  }, [bookings, statusFilter, searchQuery, selectedMonth, selectedYear, selectedTableDay, datePreset]);
 
   // Consultation requests only (with search support by phone/name)
   const consultationBookings = useMemo(() => {
@@ -789,19 +882,6 @@ export default function AdminPage() {
     [bookings, consultationForCompletedId]
   );
 
-  // Statistics calculation
-  const stats = useMemo(() => {
-    const total = bookings.length;
-    const pending = bookings.filter((b) => b.status === "pending").length;
-    const confirmed = bookings.filter((b) => b.status === "confirmed").length;
-    const completed = bookings.filter((b) => b.status === "completed").length;
-    const cancelled = bookings.filter((b) => b.status === "cancelled").length;
-    const todayCount = bookings.filter(
-      (b) => b.date === new Date().toISOString().split("T")[0]
-    ).length;
-    return { total, pending, confirmed, completed, cancelled, todayCount };
-  }, [bookings]);
-
   const selectedDateFormatted = useMemo(() => {
     try {
       const [year, month, day] = selectedDate.split("-").map(Number);
@@ -818,6 +898,45 @@ export default function AdminPage() {
       return { en: selectedDate, ar: "" };
     }
   }, [selectedDate]);
+
+  // What the Analytics Cards summarize: the Day Agenda always scopes to the
+  // selected day; the All Bookings table stays at "all time" until staff
+  // pick a specific day or month/year, at which point the cards narrow to
+  // match what the table is actually showing instead of staying global.
+  const statsScope = useMemo(() => {
+    if (viewMode === "agenda") {
+      return { bookings: agendaBookings, caption: `Records for ${selectedDateFormatted.en}` };
+    }
+    if (viewMode === "table") {
+      if (selectedTableDay) {
+        return { bookings: filteredBookings, caption: `Records for ${selectedTableDay}` };
+      }
+      if (selectedMonth !== "all" && selectedYear !== "all") {
+        const monthLabel = MONTH_NAMES.find((m) => m.value === selectedMonth)?.label.split(" (")[0] ?? selectedMonth;
+        return { bookings: filteredBookings, caption: `Records for ${monthLabel} ${selectedYear}` };
+      }
+      if (datePreset !== "all") {
+        const presetCaptions: Record<string, string> = {
+          today: "Records for today",
+          this_month: "Records for this month",
+          last_month: "Records for last month",
+          this_year: "Records for this year",
+        };
+        return { bookings: filteredBookings, caption: presetCaptions[datePreset] ?? "Filtered records" };
+      }
+    }
+    return { bookings, caption: "All time records" };
+  }, [viewMode, agendaBookings, filteredBookings, bookings, selectedDateFormatted, selectedTableDay, selectedMonth, selectedYear, datePreset]);
+
+  // Statistics calculation — scoped to `statsScope`, not always every booking.
+  const stats = useMemo(() => {
+    const scoped = statsScope.bookings;
+    const total = scoped.length;
+    const pending = scoped.filter((b) => b.status === "pending").length;
+    const confirmed = scoped.filter((b) => b.status === "confirmed").length;
+    const completed = scoped.filter((b) => b.status === "completed").length;
+    return { total, pending, confirmed, completed };
+  }, [statsScope]);
 
   if (!mounted) return null;
 
@@ -1055,7 +1174,7 @@ export default function AdminPage() {
             <div className="font-serif text-3xl font-medium text-[#101820]">
               {stats.total}
             </div>
-            <p className="text-[0.7rem] text-[#101820]/40 mt-1">All time records</p>
+            <p className="text-[0.7rem] text-[#101820]/40 mt-1">{statsScope.caption}</p>
           </div>
 
           <div className="bg-white border border-amber-500/30 rounded-2xl p-5 shadow-sm">
@@ -1146,57 +1265,31 @@ export default function AdminPage() {
                       </button>
                     )}
                   </div>
-
-                  {/* Custom Month & Date Picker */}
-                  <div className="flex items-center gap-2">
-                    {/* Month Picker */}
-                    <select
-                      value={(selectedMonthNum + 1).toString().padStart(2, "0")}
-                      onChange={(e) => {
-                        const mStr = e.target.value;
-                        const dayStr = selectedDate.split("-")[2] || "01";
-                        setSelectedDate(`${selectedYearNum}-${mStr}-${dayStr}`);
-                      }}
-                      className="bg-[#f4f1eb] border border-[#101820]/15 rounded-xl px-3 py-1.5 text-xs text-[#101820] font-medium outline-none focus:border-[#b99a6b]"
-                    >
-                      {MONTH_NAMES.map((m) => (
-                        <option key={m.value} value={m.value}>
-                          {m.label}
-                        </option>
-                      ))}
-                    </select>
-
-                    <input
-                      type="date"
-                      value={selectedDate}
-                      onChange={(e) => setSelectedDate(e.target.value)}
-                      className="bg-[#f4f1eb] border border-[#101820]/15 rounded-xl px-3 py-1.5 text-xs text-[#101820] outline-none focus:border-[#b99a6b]"
-                    />
-                  </div>
                 </div>
               </div>
 
-              {/* Quick Day Pill Bar — All days of the selected month (1..30/31) */}
+              {/* Quick Day Pill Bar — 3 days back plus a week forward from
+                  the anchor, paged a week at a time with the arrow buttons. */}
               <div className="space-y-2 pt-2 border-t border-[#101820]/10">
                 <div className="flex items-center justify-between text-xs font-medium text-[#101820]/60">
                   <span className="uppercase tracking-wider text-[0.68rem] text-[#b99a6b] font-semibold">
-                    🗓️ Days of Month ({monthDaysPills.length} Days)
+                    🗓️ This Week — {weekRangeLabel}
                   </span>
                   <div className="flex items-center p-1 rounded-xl bg-white border border-[#101820]/10 shadow-sm">
                     <button
                       type="button"
-                      onClick={() => scrollDayPills("left")}
+                      onClick={() => shiftWeek("prev")}
                       className="p-1 rounded-lg text-[#101820]/60 hover:bg-[#101820] hover:text-white transition-colors"
-                      title="Scroll to earlier days"
+                      title="Previous week"
                     >
                       <ChevronLeft className="w-3.5 h-3.5" />
                     </button>
                     <div className="w-px h-3.5 bg-[#101820]/10 mx-0.5" />
                     <button
                       type="button"
-                      onClick={() => scrollDayPills("right")}
+                      onClick={() => shiftWeek("next")}
                       className="p-1 rounded-lg text-[#101820]/60 hover:bg-[#101820] hover:text-white transition-colors"
-                      title="Scroll to later days"
+                      title="Next week"
                     >
                       <ChevronRight className="w-3.5 h-3.5" />
                     </button>
@@ -1206,9 +1299,9 @@ export default function AdminPage() {
                 <div
                   ref={dayPillsScrollRef}
                   data-lenis-prevent
-                  className="flex items-center gap-2 overflow-x-auto pt-3 pb-2 scrollbar-none"
+                  className="flex items-center gap-3 overflow-x-auto pt-3 pb-2 scrollbar-none"
                 >
-                  {monthDaysPills.map((pill) => {
+                  {weekDaysPills.map((pill) => {
                     const countForDay = bookings.filter(
                       (b) => b.date === pill.iso
                     ).length;
@@ -1218,41 +1311,30 @@ export default function AdminPage() {
                         key={pill.iso}
                         data-iso={pill.iso}
                         onClick={() => setSelectedDate(pill.iso)}
-                        className={`flex flex-col items-center py-2 px-3 rounded-xl transition-all whitespace-nowrap min-w-[4.2rem] border relative ${
+                        className={`flex flex-col items-center gap-1.5 py-4 px-5 rounded-2xl transition-all whitespace-nowrap min-w-[7rem] border ${
                           isSelected
                             ? "bg-[#101820] text-[#f4f1eb] border-[#101820] shadow-md scale-[1.04]"
-                            : pill.isToday
-                            ? "bg-[#b99a6b]/15 border-[#b99a6b]/40 text-[#101820]"
                             : "bg-[#f4f1eb]/70 hover:bg-[#f4f1eb] border-[#101820]/10 text-[#101820]"
                         }`}
                       >
-                        {pill.isToday && (
-                          <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 z-10 bg-[#b99a6b] text-[#101820] text-[0.52rem] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-full shadow-sm whitespace-nowrap">
-                            Today
-                          </span>
-                        )}
                         <span
-                          className={`text-[0.62rem] uppercase tracking-wider font-medium ${
-                            isSelected ? "text-[#b99a6b]" : "text-[#101820]/60"
+                          className={`text-xs uppercase tracking-wider font-medium ${
+                            isSelected ? "text-[#b99a6b]" : "text-[#101820]/50"
                           }`}
                         >
-                          {pill.dayName}
+                          {pill.dayLabel}
                         </span>
-                        <span className="font-serif text-base font-bold mt-0.5">
-                          {pill.day}
-                        </span>
-                        {countForDay > 0 ? (
+                        <span className="font-serif text-lg font-bold">{pill.dateLabel}</span>
+                        {countForDay > 0 && (
                           <span
-                            className={`mt-0.5 text-[0.6rem] px-1.5 py-0.2 rounded-full font-semibold ${
+                            className={`text-xs px-2.5 py-1 rounded-full font-medium ${
                               isSelected
                                 ? "bg-[#b99a6b] text-[#101820]"
-                                : "bg-[#101820]/15 text-[#101820]"
+                                : "bg-[#101820]/10 text-[#101820]/70"
                             }`}
                           >
-                            {countForDay}
+                            {countForDay} patient{countForDay === 1 ? "" : "s"}
                           </span>
-                        ) : (
-                          <span className="mt-0.5 text-[0.58rem] opacity-30">—</span>
                         )}
                       </button>
                     );
@@ -1620,6 +1702,7 @@ export default function AdminPage() {
                   onChange={(e) => {
                     setSelectedMonth(e.target.value);
                     setDatePreset("all");
+                    setSelectedTableDay(null);
                   }}
                   className="bg-[#f4f1eb] border border-[#101820]/15 rounded-xl px-3 py-1.5 text-xs text-[#101820] font-medium outline-none focus:border-[#b99a6b]"
                 >
@@ -1637,6 +1720,7 @@ export default function AdminPage() {
                   onChange={(e) => {
                     setSelectedYear(e.target.value);
                     setDatePreset("all");
+                    setSelectedTableDay(null);
                   }}
                   className="bg-[#f4f1eb] border border-[#101820]/15 rounded-xl px-3 py-1.5 text-xs text-[#101820] font-medium outline-none focus:border-[#b99a6b]"
                 >
@@ -1661,6 +1745,70 @@ export default function AdminPage() {
                 />
               </div>
             </div>
+
+            {/* Day-of-month strip — appears once a specific month + year are
+                picked; click a day to narrow the table to just that day,
+                click it again to go back to the whole month. */}
+            {tableDaysPills.length > 0 && (
+              <div className="bg-white border border-[#101820]/10 rounded-2xl p-4 shadow-sm space-y-2">
+                <div className="flex items-center justify-between text-xs font-medium text-[#101820]/60">
+                  <span className="uppercase tracking-wider text-[0.68rem] text-[#b99a6b] font-semibold">
+                    🗓️ Days in {MONTH_NAMES.find((m) => m.value === selectedMonth)?.label ?? selectedMonth} {selectedYear}
+                  </span>
+                  {selectedTableDay && (
+                    <button
+                      onClick={() => setSelectedTableDay(null)}
+                      className="inline-flex items-center gap-1 text-[0.68rem] font-medium text-[#101820]/60 hover:text-[#101820]"
+                    >
+                      <X className="w-3 h-3" /> Clear day filter
+                    </button>
+                  )}
+                </div>
+                <div
+                  ref={tableDayPillsScrollRef}
+                  data-lenis-prevent
+                  className="flex items-center gap-2 overflow-x-auto pt-1 pb-2 scrollbar-none"
+                >
+                  {tableDaysPills.map((pill) => {
+                    const countForDay = bookings.filter((b) => b.date === pill.iso).length;
+                    const isSelected = selectedTableDay === pill.iso;
+                    return (
+                      <button
+                        key={pill.iso}
+                        onClick={() => setSelectedTableDay(isSelected ? null : pill.iso)}
+                        className={`flex flex-col items-center gap-0.5 py-2 px-2.5 rounded-xl transition-all whitespace-nowrap min-w-[3.6rem] border ${
+                          isSelected
+                            ? "bg-[#101820] text-[#f4f1eb] border-[#101820] shadow-md scale-[1.04]"
+                            : pill.isToday
+                            ? "bg-[#b99a6b]/15 border-[#b99a6b]/40 text-[#101820]"
+                            : "bg-[#f4f1eb]/70 hover:bg-[#f4f1eb] border-[#101820]/10 text-[#101820]"
+                        }`}
+                      >
+                        <span
+                          className={`text-[0.6rem] uppercase tracking-wider font-medium ${
+                            isSelected ? "text-[#b99a6b]" : "text-[#101820]/50"
+                          }`}
+                        >
+                          {pill.dayName}
+                        </span>
+                        <span className="font-serif text-sm font-bold">{pill.day}</span>
+                        {countForDay > 0 ? (
+                          <span
+                            className={`text-[0.58rem] px-1.5 py-0.2 rounded-full font-semibold ${
+                              isSelected ? "bg-[#b99a6b] text-[#101820]" : "bg-[#101820]/15 text-[#101820]"
+                            }`}
+                          >
+                            {countForDay}
+                          </span>
+                        ) : (
+                          <span className="text-[0.55rem] opacity-30">—</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Table Container */}
             <div className="bg-white border border-[#101820]/10 rounded-2xl overflow-hidden shadow-sm">
@@ -2219,7 +2367,7 @@ export default function AdminPage() {
                   Total Visits (إجمالي الزيارات)
                 </span>
                 <span className="font-serif text-xl font-bold text-[#101820]">
-                  {selectedPatientVisits.length} Visit{selectedPatientVisits.length > 1 ? "s" : ""}
+                  {patientVisits.length} Visit{patientVisits.length > 1 ? "s" : ""}
                 </span>
               </div>
               <div>
@@ -2227,7 +2375,7 @@ export default function AdminPage() {
                   Completed (الزيارات المكتملة)
                 </span>
                 <span className="font-serif text-xl font-bold text-emerald-700">
-                  {selectedPatientVisits.filter((v) => v.status === "completed").length}
+                  {patientVisits.filter((v) => v.status === "completed").length}
                 </span>
               </div>
               <div>
@@ -2235,7 +2383,7 @@ export default function AdminPage() {
                   First Visit (أول زيارة)
                 </span>
                 <span className="font-serif text-sm font-semibold text-[#101820] mt-1 block">
-                  {selectedPatientVisits[selectedPatientVisits.length - 1]?.date || "—"}
+                  {patientVisits[patientVisits.length - 1]?.date || "—"}
                 </span>
               </div>
             </div>
@@ -2268,7 +2416,7 @@ export default function AdminPage() {
                     phone: selectedBooking.phone,
                     email: selectedBooking.email || "",
                     treatment: TREATMENT_OPTIONS[0],
-                    date: new Date().toISOString().split("T")[0],
+                    date: toLocalIso(),
                     message: "",
                   });
                   setSelectedBooking(null);
@@ -2289,12 +2437,26 @@ export default function AdminPage() {
                   Patient Medical & Visit History (سجل الحجوزات والزيارات)
                 </h4>
                 <span className="text-xs text-[#101820]/50 font-mono">
-                  {selectedPatientVisits.length} Record{selectedPatientVisits.length > 1 ? "s" : ""}
+                  {patientVisits.length} Record{patientVisits.length > 1 ? "s" : ""}
                 </span>
               </div>
 
+              {isLoadingPatientVisits && (
+                <div className="flex items-center gap-2 text-xs text-[#101820]/50 py-6 justify-center">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#b99a6b]" />
+                  Loading this patient&apos;s full record…
+                </div>
+              )}
+
+              {patientVisitsError && (
+                <div className="flex items-center gap-2 text-xs text-red-700 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2.5">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  {patientVisitsError}
+                </div>
+              )}
+
               <div className="space-y-3">
-                {selectedPatientVisits.map((visit, index) => (
+                {!isLoadingPatientVisits && patientVisits.map((visit, index) => (
                   <div
                     key={visit.id}
                     className={`p-4 rounded-2xl border transition-all ${
@@ -2306,7 +2468,7 @@ export default function AdminPage() {
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#101820]/10 pb-2.5 mb-3">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-serif font-bold text-[#101820]">
-                          Visit #{selectedPatientVisits.length - index}
+                          Visit #{patientVisits.length - index}
                         </span>
                         <span className="text-xs text-[#101820]/40">•</span>
                         <span className="text-xs font-medium text-[#101820] flex items-center gap-1">
