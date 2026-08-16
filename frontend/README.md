@@ -202,7 +202,7 @@ lumina-dental/
 
 - **Placeholder visuals** — treatment previews, the clinic gallery, the doctor portrait, and the map are art‑directed CSS gradients/SVG. They’re built to be swapped 1:1 for real photography (drop images in and point the data at them).
 - **The 3D tooth** lives at `public/models/tooth.glb`; the loader is generic, so any artist‑authored tooth GLB can replace it at the same path.
-- **No backend** — the booking form is a front‑end demonstration only.
+- **Backend** — the booking form and the `/admin` dashboard talk to a real FastAPI service in [`../backend`](../backend); see the [project‑level README](../README.md) for full‑stack setup. This file only covers the `frontend/` package.
 
 ---
 

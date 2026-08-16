@@ -204,6 +204,20 @@ def set_payment_paid(db: Session, booking_id: int) -> Booking | None:
     return booking
 
 
+def set_extra_charge(
+    db: Session, booking_id: int, amount: float, description: str | None, paid: bool
+) -> Booking | None:
+    booking = get_booking(db, booking_id)
+    if booking is None:
+        return None
+    booking.extra_charge_amount = amount
+    booking.extra_charge_description = description
+    booking.extra_charge_paid = paid
+    db.commit()
+    db.refresh(booking)
+    return booking
+
+
 def delete_booking(db: Session, booking_id: int) -> bool:
     booking = get_booking(db, booking_id)
     if booking is None:

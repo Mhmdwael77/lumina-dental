@@ -74,6 +74,14 @@ class ConsultationHintUpdate(BaseModel):
     dismissed: bool
 
 
+class ExtraChargeUpdate(BaseModel):
+    """Staff-entered extra charge on top of the base appointment — e.g. a
+    crown/filling/add-on done during or after the exam."""
+    amount: float = Field(..., ge=0, examples=[350.0])
+    description: Optional[str] = Field(None, max_length=200, examples=["Crown fitting"])
+    paid: bool = False
+
+
 class PaymentConfirmRequest(BaseModel):
     """Simulated online-payment confirmation.
 
@@ -109,6 +117,10 @@ class BookingResponse(BaseModel):
     payment_method: PaymentMethodEnum
     payment_status: PaymentStatusEnum
     reminder_status: ReminderStatusEnum
+
+    extra_charge_amount: Optional[float] = None
+    extra_charge_description: Optional[str] = None
+    extra_charge_paid: bool = False
 
     created_at: datetime
     updated_at: datetime

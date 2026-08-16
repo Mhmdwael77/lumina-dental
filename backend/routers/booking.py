@@ -28,6 +28,7 @@ from schemas.booking import (
     QueueStatusResponse,
     ArrivalUpdate,
     ConsultationHintUpdate,
+    ExtraChargeUpdate,
     PaymentConfirmRequest,
 )
 from services.booking_service import (
@@ -37,6 +38,7 @@ from services.booking_service import (
     confirm_online_payment,
     mark_arrival,
     set_consultation_hint,
+    set_extra_charge,
     list_bookings,
     get_single_booking,
     change_booking_status,
@@ -147,6 +149,20 @@ def update_consultation_hint(
     _: User = Depends(require_staff),
 ):
     return set_consultation_hint(db, booking_id, body.dismissed)
+
+
+@router.patch(
+    "/{booking_id}/extra-charge",
+    response_model=BookingResponse,
+    summary="Set/update an extra charge on top of the base appointment (staff)",
+)
+def update_extra_charge(
+    booking_id: int,
+    body: ExtraChargeUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_staff),
+):
+    return set_extra_charge(db, booking_id, body)
 
 
 @router.post(

@@ -31,6 +31,9 @@ export interface Booking {
   payment_method: PaymentMethod;
   payment_status: PaymentStatus;
   reminder_status: ReminderStatus;
+  extra_charge_amount?: number | null;
+  extra_charge_description?: string | null;
+  extra_charge_paid?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -354,6 +357,27 @@ export async function updateConsultationHintDismissed(
     localStorage.setItem("lumina_demo_bookings", JSON.stringify(updated));
   }
   return true;
+}
+
+/**
+ * Set/update the extra charge on a booking — e.g. a crown/filling/add-on
+ * done during or after the exam, on top of the base appointment.
+ */
+export async function updateExtraCharge(
+  token: string,
+  bookingId: number,
+  data: { amount: number; description?: string; paid: boolean }
+): Promise<Booking> {
+  const res = await fetch(`${API_BASE_URL}/bookings/${bookingId}/extra-charge`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not save the extra charge."), res.status);
+  return res.json();
 }
 
 /** Delete a booking */

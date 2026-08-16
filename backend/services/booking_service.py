@@ -24,12 +24,13 @@ from core.crud.booking import (
     set_arrival as crud_set_arrival,
     set_consultation_hint_dismissed as crud_set_hint,
     set_payment_paid as crud_set_payment_paid,
+    set_extra_charge as crud_set_extra_charge,
     delete_booking as crud_delete,
 )
 from core.database import Booking, BookingStatus, PaymentMethod, PaymentStatus, ServiceType
 from core.clinic_schedule import get_working_hours, is_working_day, is_within_working_hours
 from core.config import settings
-from schemas.booking import BookingCreate, BookingStatusUpdate, ServiceTypeEnum
+from schemas.booking import BookingCreate, BookingStatusUpdate, ExtraChargeUpdate, ServiceTypeEnum
 
 # Treatments must match the frontend constants
 VALID_TREATMENTS = {
@@ -320,6 +321,13 @@ def set_consultation_hint(db: Session, booking_id: int, dismissed: bool) -> Book
 
 def change_booking_status(db: Session, booking_id: int, update: BookingStatusUpdate):
     booking = crud_update_status(db, booking_id, BookingStatus(update.status.value))
+    if booking is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+    return booking
+
+
+def set_extra_charge(db: Session, booking_id: int, update: ExtraChargeUpdate) -> Booking:
+    booking = crud_set_extra_charge(db, booking_id, update.amount, update.description, update.paid)
     if booking is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
     return booking

@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     Text,
     Boolean,
+    Float,
     UniqueConstraint,
     Enum as SAEnum,
     inspect,
@@ -111,6 +112,13 @@ class Booking(Base):
     payment_method = Column(SAEnum(PaymentMethod), default=PaymentMethod.CLINIC, nullable=False)
     payment_status = Column(SAEnum(PaymentStatus), default=PaymentStatus.PENDING, nullable=False)
 
+    # Extra charge on top of the base appointment — e.g. the patient got a
+    # crown/filling/add-on done during or after the exam. Staff-entered, so it
+    # only ever exists once someone sets it; NULL/0 means no extra charge.
+    extra_charge_amount = Column(Float, nullable=True)
+    extra_charge_description = Column(String(200), nullable=True)
+    extra_charge_paid = Column(Boolean, default=False, nullable=False)
+
     # ── WhatsApp reminder ────────────────────────────────────────────────
     reminder_status = Column(SAEnum(ReminderStatus), default=ReminderStatus.PENDING, nullable=False)
     reminder_sent_at = Column(DateTime, nullable=True)
@@ -174,7 +182,7 @@ def _migrate_missing_columns() -> None:
                     continue
                 col_type = column.type.compile(dialect=engine.dialect)
                 default_clause = ""
-                if column.name in ("patient_arrived", "consultation_hint_dismissed"):
+                if column.name in ("patient_arrived", "consultation_hint_dismissed", "extra_charge_paid"):
                     default_clause = " DEFAULT 0"
                 elif column.name == "service_type":
                     # SAEnum stores the member NAME (e.g. existing rows hold

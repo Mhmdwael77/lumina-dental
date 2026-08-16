@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import {
   Calendar as CalendarIcon,
   User,
@@ -33,6 +33,7 @@ import {
   UserX,
   Stethoscope,
   CalendarClock,
+  Receipt,
 } from "lucide-react";
 import {
   ApiError,
@@ -45,6 +46,7 @@ import {
   updateBookingStatus,
   updateArrivalStatus,
   updateConsultationHintDismissed,
+  updateExtraCharge,
   deleteBooking,
   submitBooking,
   checkBackendHealth,
@@ -122,6 +124,42 @@ export default function AdminPage() {
     new Date().toISOString().split("T")[0]
   );
 
+  // Month & Year Filter States (for reviewing past month/year records)
+  const [selectedMonth, setSelectedMonth] = useState<string>("all"); // "all", "01".."12"
+  const [selectedYear, setSelectedYear] = useState<string>("all");   // "all", "2024".."2027"
+  const [datePreset, setDatePreset] = useState<string>("all");       // "all", "today", "this_month", "last_month", "this_year"
+
+  // Refresh feedback state
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshToast, setRefreshToast] = useState(false);
+
+  // Day Agenda horizontal pill bar — lets us page with the arrow buttons and
+  // auto-scroll to keep the selected day in view.
+  const dayPillsScrollRef = useRef<HTMLDivElement>(null);
+  const scrollDayPills = (direction: "left" | "right") => {
+    const container = dayPillsScrollRef.current;
+    if (!container) return;
+    const amount = container.clientWidth * 0.6 * (direction === "left" ? -1 : 1);
+    container.scrollBy({ left: amount, behavior: "smooth" });
+  };
+
+  // Let a plain mouse wheel page the day pills sideways. React attaches its
+  // synthetic onWheel as a passive listener, so preventDefault() there is
+  // silently ignored by the browser and the page scrolls vertically at the
+  // same time — a native, explicitly non-passive listener is required to
+  // actually suppress that page scroll.
+  useEffect(() => {
+    const container = dayPillsScrollRef.current;
+    if (!container) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY === 0) return;
+      e.preventDefault();
+      container.scrollLeft += e.deltaY;
+    };
+    container.addEventListener("wheel", onWheel, { passive: false });
+    return () => container.removeEventListener("wheel", onWheel);
+  }, [viewMode]);
+
   // Dashboard data state
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -157,6 +195,13 @@ export default function AdminPage() {
   const [arrivalUpdatingId, setArrivalUpdatingId] = useState<number | null>(null);
   const [arrivalError, setArrivalError] = useState("");
 
+  // Extra charge state (staff add a charge on top of the base appointment —
+  // e.g. a crown/filling done during or after the exam).
+  const [editingExtraChargeId, setEditingExtraChargeId] = useState<number | null>(null);
+  const [extraChargeDraft, setExtraChargeDraft] = useState({ amount: "", description: "", paid: false });
+  const [extraChargeSavingId, setExtraChargeSavingId] = useState<number | null>(null);
+  const [extraChargeError, setExtraChargeError] = useState("");
+
   // Check saved token on mount
   useEffect(() => {
     setMounted(true);
@@ -182,9 +227,6 @@ export default function AdminPage() {
       const data = await fetchBookings(activeToken);
       setBookings(data);
     } catch (err) {
-      // Session expired / invalid: go back to the login screen with a clear
-      // message instead of leaving an empty dashboard that looks like the data
-      // was deleted. (The records are safe on the backend the whole time.)
       if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
         removeToken();
         setTokenState(null);
@@ -193,6 +235,14 @@ export default function AdminPage() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    await loadBookings();
+    setIsRefreshing(false);
+    setRefreshToast(true);
+    setTimeout(() => setRefreshToast(false), 2500);
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -330,65 +380,382 @@ export default function AdminPage() {
     }
   };
 
-  // Helper date buttons (Today, Tomorrow, Sunday, Monday...)
-  const dayQuickPills = useMemo(() => {
-    const today = new Date();
-    const result = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(today);
-      d.setDate(today.getDate() + i);
-      const iso = d.toISOString().split("T")[0];
-      const dayName =
-        i === 0
-          ? "Today"
-          : i === 1
-          ? "Tomorrow"
-          : d.toLocaleDateString("en-US", { weekday: "short" });
-      const dayNameAr = d.toLocaleDateString("ar-EG", { weekday: "long" });
-      const dateFormatted = d.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
+  // Extra charge (crown, filling, or any add-on work billed on top of the
+  // base appointment) — staff open the inline editor from the agenda card,
+  // the table, or the patient record modal, all sharing this one draft.
+  const startEditExtraCharge = (b: Booking) => {
+    setEditingExtraChargeId(b.id);
+    setExtraChargeDraft({
+      amount: b.extra_charge_amount ? String(b.extra_charge_amount) : "",
+      description: b.extra_charge_description || "",
+      paid: b.extra_charge_paid || false,
+    });
+    setExtraChargeError("");
+  };
+
+  const cancelEditExtraCharge = () => {
+    setEditingExtraChargeId(null);
+    setExtraChargeError("");
+  };
+
+  const handleSaveExtraCharge = async (bookingId: number) => {
+    const amount = parseFloat(extraChargeDraft.amount);
+    if (isNaN(amount) || amount < 0) {
+      setExtraChargeError("Enter a valid amount (0 or more).");
+      return;
+    }
+    setExtraChargeSavingId(bookingId);
+    setExtraChargeError("");
+    try {
+      const updated = await updateExtraCharge(token || "", bookingId, {
+        amount,
+        description: extraChargeDraft.description.trim() || undefined,
+        paid: extraChargeDraft.paid,
       });
-      result.push({ iso, dayName, dayNameAr, dateFormatted });
+      setBookings((prev) => prev.map((b) => (b.id === bookingId ? updated : b)));
+      if (selectedBooking?.id === bookingId) setSelectedBooking(updated);
+      setEditingExtraChargeId(null);
+    } catch (err) {
+      setExtraChargeError(err instanceof ApiError ? err.message : "Could not save the extra charge.");
+    } finally {
+      setExtraChargeSavingId(null);
+    }
+  };
+
+  const handleRemoveExtraCharge = async (bookingId: number) => {
+    setExtraChargeSavingId(bookingId);
+    setExtraChargeError("");
+    try {
+      const updated = await updateExtraCharge(token || "", bookingId, {
+        amount: 0,
+        description: undefined,
+        paid: false,
+      });
+      setBookings((prev) => prev.map((b) => (b.id === bookingId ? updated : b)));
+      if (selectedBooking?.id === bookingId) setSelectedBooking(updated);
+      setEditingExtraChargeId(null);
+    } catch (err) {
+      setExtraChargeError(err instanceof ApiError ? err.message : "Could not remove the extra charge.");
+    } finally {
+      setExtraChargeSavingId(null);
+    }
+  };
+
+  /** Small badge shown wherever a booking is listed — null when no extra
+   *  charge has been set (the common case), so callers can render it inline. */
+  const renderExtraChargeBadge = (b: Booking) => {
+    if (!b.extra_charge_amount || b.extra_charge_amount <= 0) return null;
+    return (
+      <span
+        title={b.extra_charge_description || undefined}
+        className={`inline-flex items-center gap-1 text-xs px-3 py-1 rounded-full font-medium border ${
+          b.extra_charge_paid
+            ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700"
+            : "bg-red-500/10 border-red-500/30 text-red-700"
+        }`}
+      >
+        <Receipt className="w-3.5 h-3.5" />
+        +{b.extra_charge_amount.toLocaleString()} EGP {b.extra_charge_paid ? "· Paid" : "· Unpaid"}
+      </span>
+    );
+  };
+
+  /** Inline add/edit form for the extra charge — rendered under a booking
+   *  card/row only while it's the one being edited. */
+  const renderExtraChargePanel = (b: Booking) => {
+    if (editingExtraChargeId !== b.id) return null;
+    const saving = extraChargeSavingId === b.id;
+    return (
+      <div className="p-4 rounded-2xl bg-[#f4f1eb] border border-[#b99a6b]/30 space-y-4">
+        <div className="flex items-center gap-2 text-xs font-semibold text-[#101820] uppercase tracking-wider">
+          <span className="flex items-center justify-center h-6 w-6 rounded-lg bg-[#b99a6b]/20 text-[#b99a6b]">
+            <Receipt className="w-3.5 h-3.5" />
+          </span>
+          Extra Charge
+          <span className="font-normal normal-case tracking-normal text-[#101820]/50">
+            — e.g. crown, filling, add-on work
+          </span>
+        </div>
+        {extraChargeError && (
+          <p className="text-xs text-red-600 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+            {extraChargeError}
+          </p>
+        )}
+        <div className="grid grid-cols-1 sm:grid-cols-[7rem_1fr_9rem] gap-3">
+          <div>
+            <label className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50 mb-1">Amount</label>
+            <div className="relative">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={extraChargeDraft.amount}
+                onChange={(e) => setExtraChargeDraft((d) => ({ ...d, amount: e.target.value }))}
+                placeholder="0"
+                className="w-full bg-white border border-[#101820]/15 rounded-xl pl-3 pr-11 py-2 text-sm font-medium text-[#101820] outline-none focus:border-[#b99a6b]"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[0.65rem] font-medium text-[#101820]/40">
+                EGP
+              </span>
+            </div>
+          </div>
+          <div>
+            <label className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50 mb-1">
+              What for?
+            </label>
+            <input
+              type="text"
+              value={extraChargeDraft.description}
+              onChange={(e) => setExtraChargeDraft((d) => ({ ...d, description: e.target.value }))}
+              placeholder="e.g. Crown fitting"
+              className="w-full bg-white border border-[#101820]/15 rounded-xl px-3 py-2 text-xs text-[#101820] outline-none focus:border-[#b99a6b]"
+            />
+          </div>
+          <div>
+            <label className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50 mb-1">
+              Status
+            </label>
+            <label className="flex items-center gap-2 h-[calc(100%-0px)] px-3 py-2 rounded-xl bg-white border border-[#101820]/15 text-xs text-[#101820] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={extraChargeDraft.paid}
+                onChange={(e) => setExtraChargeDraft((d) => ({ ...d, paid: e.target.checked }))}
+                className="accent-[#b99a6b] w-3.5 h-3.5"
+              />
+              Paid already
+            </label>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 pt-1">
+          <button
+            onClick={() => handleSaveExtraCharge(b.id)}
+            disabled={saving}
+            className="px-4 py-1.5 rounded-xl bg-[#101820] text-[#f4f1eb] text-xs font-medium hover:bg-[#101820]/85 transition-colors disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save Charge"}
+          </button>
+          {typeof b.extra_charge_amount === "number" && b.extra_charge_amount > 0 && (
+            <button
+              onClick={() => handleRemoveExtraCharge(b.id)}
+              disabled={saving}
+              className="px-4 py-1.5 rounded-xl bg-red-500/10 text-red-700 text-xs font-medium hover:bg-red-500/20 transition-colors disabled:opacity-50"
+            >
+              Remove
+            </button>
+          )}
+          <button
+            onClick={cancelEditExtraCharge}
+            className="px-3.5 py-1.5 rounded-xl bg-white border border-[#101820]/15 text-[#101820]/70 text-xs font-medium hover:bg-[#101820]/5 transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // Derived selected Year & Month for the Day Agenda View
+  const selectedYearNum = useMemo(() => {
+    try {
+      return parseInt(selectedDate.split("-")[0], 10) || new Date().getFullYear();
+    } catch {
+      return new Date().getFullYear();
+    }
+  }, [selectedDate]);
+
+  const selectedMonthNum = useMemo(() => {
+    try {
+      return parseInt(selectedDate.split("-")[1], 10) - 1 || new Date().getMonth();
+    } catch {
+      return new Date().getMonth();
+    }
+  }, [selectedDate]);
+
+  // Compute ALL DAYS OF THE ENTIRE MONTH for the Agenda View day picker bar (1..30/31)
+  const monthDaysPills = useMemo(() => {
+    const year = selectedYearNum;
+    const month = selectedMonthNum;
+    const totalDays = new Date(year, month + 1, 0).getDate();
+    const todayIso = new Date().toISOString().split("T")[0];
+    const result = [];
+
+    for (let day = 1; day <= totalDays; day++) {
+      const dateObj = new Date(year, month, day);
+      const mm = (month + 1).toString().padStart(2, "0");
+      const dd = day.toString().padStart(2, "0");
+      const iso = `${year}-${mm}-${dd}`;
+
+      const dayName = dateObj.toLocaleDateString("en-US", { weekday: "short" });
+      const dayNameAr = dateObj.toLocaleDateString("ar-EG", { weekday: "short" });
+      const isToday = iso === todayIso;
+
+      result.push({
+        iso,
+        day,
+        dayName,
+        dayNameAr,
+        isToday,
+      });
     }
     return result;
-  }, []);
+  }, [selectedYearNum, selectedMonthNum]);
 
-  // Filtered Bookings for the selected day in Agenda View
+  // Keep the selected day's pill in view whenever it changes (date picker,
+  // month switch, or a click elsewhere) instead of leaving staff to hunt for
+  // it by hand in the horizontal scroller.
+  useEffect(() => {
+    const container = dayPillsScrollRef.current;
+    if (!container) return;
+    const selectedPill = container.querySelector<HTMLButtonElement>(
+      `[data-iso="${selectedDate}"]`
+    );
+    selectedPill?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  }, [selectedDate, monthDaysPills]);
+
+  // Filtered Bookings for the selected day in Agenda View (with search support)
   const agendaBookings = useMemo(() => {
-    return bookings
-      .filter((b) => b.date === selectedDate)
-      .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
-  }, [bookings, selectedDate]);
+    const query = searchQuery.toLowerCase().trim();
+    const queryDigits = digitsOf(query);
 
-  // Filtered & Searched Bookings list for Table View
+    return bookings
+      .filter((b) => {
+        const isSelectedDay = b.date === selectedDate;
+        if (!query) return isSelectedDay;
+
+        const phoneDigits = digitsOf(b.phone);
+        const matchesPhone =
+          b.phone.toLowerCase().includes(query) ||
+          (queryDigits.length >= 3 && phoneDigits.includes(queryDigits));
+        const matchesText =
+          b.full_name.toLowerCase().includes(query) ||
+          (b.email && b.email.toLowerCase().includes(query)) ||
+          b.treatment.toLowerCase().includes(query);
+
+        return isSelectedDay && (matchesPhone || matchesText);
+      })
+      .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+  }, [bookings, selectedDate, searchQuery]);
+
+  // Available Years computed from current date & all bookings
+  const availableYears = useMemo(() => {
+    const years = new Set<string>();
+    const currentYr = new Date().getFullYear().toString();
+    years.add(currentYr);
+    for (const b of bookings) {
+      if (b.date && b.date.length >= 4) {
+        years.add(b.date.substring(0, 4));
+      }
+    }
+    return Array.from(years).sort((a, b) => b.localeCompare(a));
+  }, [bookings]);
+
+  const MONTH_NAMES = [
+    { value: "01", label: "January (يناير)" },
+    { value: "02", label: "February (فبراير)" },
+    { value: "03", label: "March (مارس)" },
+    { value: "04", label: "April (أبريل)" },
+    { value: "05", label: "May (مايو)" },
+    { value: "06", label: "June (يونيو)" },
+    { value: "07", label: "July (يوليو)" },
+    { value: "08", label: "August (أغسطس)" },
+    { value: "09", label: "September (سبتمبر)" },
+    { value: "10", label: "October (أكتوبر)" },
+    { value: "11", label: "November (نوفمبر)" },
+    { value: "12", label: "December (ديسمبر)" },
+  ];
+
+  // All bookings for the selected patient when Eye icon is clicked
+  const selectedPatientVisits = useMemo(() => {
+    if (!selectedBooking) return [];
+    return bookings
+      .filter((b) => phonesMatch(b.phone, selectedBooking.phone) || (b.email && selectedBooking.email && b.email.toLowerCase() === selectedBooking.email.toLowerCase()))
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [bookings, selectedBooking]);
+
+  // Filtered & Searched Bookings list for Table View & Month/Year Scope
   const filteredBookings = useMemo(() => {
+    const now = new Date();
+    const currentIso = now.toISOString().split("T")[0];
+    const currentYearMonth = currentIso.substring(0, 7);
+    const currentYear = currentIso.substring(0, 4);
+
+    const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevYearMonth = prevDate.toISOString().split("T")[0].substring(0, 7);
+
     return bookings.filter((b) => {
+      // Status filter
       const matchesStatus =
         statusFilter === "all" ? true : b.status === statusFilter;
+
+      // Smart Phone & Text Search query filter
       const query = searchQuery.toLowerCase().trim();
+      const queryDigits = digitsOf(query);
+      const phoneDigits = digitsOf(b.phone);
+
+      const matchesPhone =
+        b.phone.toLowerCase().includes(query) ||
+        (queryDigits.length >= 3 && phoneDigits.includes(queryDigits));
+
       const matchesQuery =
         !query ||
+        matchesPhone ||
         b.full_name.toLowerCase().includes(query) ||
-        b.phone.toLowerCase().includes(query) ||
         (b.email && b.email.toLowerCase().includes(query)) ||
         b.treatment.toLowerCase().includes(query) ||
         b.date.includes(query);
-      return matchesStatus && matchesQuery;
-    });
-  }, [bookings, statusFilter, searchQuery]);
 
-  // Consultation requests only, across every day — most recent date first so
-  // staff triage newly-requested consultations at the top.
+      // Month filter
+      const matchesMonth =
+        selectedMonth === "all" ? true : b.date.substring(5, 7) === selectedMonth;
+
+      // Year filter
+      const matchesYear =
+        selectedYear === "all" ? true : b.date.substring(0, 4) === selectedYear;
+
+      // Date scope presets
+      let matchesPreset = true;
+      if (datePreset === "today") {
+        matchesPreset = b.date === currentIso;
+      } else if (datePreset === "this_month") {
+        matchesPreset = b.date.substring(0, 7) === currentYearMonth;
+      } else if (datePreset === "last_month") {
+        matchesPreset = b.date.substring(0, 7) === prevYearMonth;
+      } else if (datePreset === "this_year") {
+        matchesPreset = b.date.substring(0, 4) === currentYear;
+      }
+
+      return matchesStatus && matchesQuery && matchesMonth && matchesYear && matchesPreset;
+    });
+  }, [bookings, statusFilter, searchQuery, selectedMonth, selectedYear, datePreset]);
+
+  // Consultation requests only (with search support by phone/name)
   const consultationBookings = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+    const queryDigits = digitsOf(query);
+
     return bookings
-      .filter(isConsultation)
+      .filter((b) => {
+        if (!isConsultation(b)) return false;
+        if (!query) return true;
+
+        const phoneDigits = digitsOf(b.phone);
+        const matchesPhone =
+          b.phone.toLowerCase().includes(query) ||
+          (queryDigits.length >= 3 && phoneDigits.includes(queryDigits));
+        const matchesText =
+          b.full_name.toLowerCase().includes(query) ||
+          (b.email && b.email.toLowerCase().includes(query)) ||
+          b.treatment.toLowerCase().includes(query) ||
+          b.date.includes(query);
+
+        return matchesPhone || matchesText;
+      })
       .sort(
         (a, b) =>
           b.date.localeCompare(a.date) ||
           (a.queue_number ?? 0) - (b.queue_number ?? 0)
       );
-  }, [bookings]);
+  }, [bookings, searchQuery]);
 
   // Every COMPLETED exam that has the same patient's consultation (matched by
   // phone), IGNORING the show/hide flag. Drives whether the "Has consultation"
@@ -633,14 +1000,21 @@ export default function AdminPage() {
               <span>+ New Appointment</span>
             </button>
 
-            <button
-              onClick={loadBookings}
-              disabled={isLoading}
-              title="Refresh bookings"
-              className="p-2 rounded-xl bg-white border border-[#101820]/10 hover:bg-[#101820]/5 text-[#101820]/70 transition-colors shadow-sm"
-            >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
-            </button>
+            <div className="relative flex items-center">
+              <button
+                onClick={handleManualRefresh}
+                disabled={isLoading || isRefreshing}
+                title="Refresh bookings from server"
+                className="p-2 rounded-xl bg-white border border-[#101820]/10 hover:bg-[#101820]/5 text-[#101820]/70 transition-colors shadow-sm"
+              >
+                <RefreshCw className={`w-4 h-4 ${isLoading || isRefreshing ? "animate-spin text-[#b99a6b]" : ""}`} />
+              </button>
+              {refreshToast && (
+                <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap text-[0.68rem] font-medium text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-md shadow-md animate-in fade-in z-40">
+                  ✓ Refreshed!
+                </span>
+              )}
+            </div>
 
             <button
               onClick={handleLogout}
@@ -751,61 +1125,139 @@ export default function AdminPage() {
                   </p>
                 </div>
 
-                {/* Custom Date Picker */}
-                <div className="flex items-center gap-2">
-                  <label className="text-xs font-medium text-[#101820]/60 uppercase tracking-wider">
-                    Select Date:
-                  </label>
-                  <input
-                    type="date"
-                    value={selectedDate}
-                    onChange={(e) => setSelectedDate(e.target.value)}
-                    className="bg-[#f4f1eb] border border-[#101820]/15 rounded-xl px-3 py-1.5 text-xs text-[#101820] outline-none focus:border-[#b99a6b]"
-                  />
+                {/* Agenda Search & Date Controls */}
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Search Input for Agenda */}
+                  <div className="relative w-full sm:w-64">
+                    <Search className="absolute left-3.5 top-2.5 w-4 h-4 text-[#101820]/40" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search patient, phone (01x)..."
+                      className="w-full bg-[#f4f1eb] border border-[#101820]/15 rounded-xl pl-10 pr-8 py-1.5 text-xs text-[#101820] placeholder-[#101820]/40 outline-none focus:border-[#b99a6b]"
+                    />
+                    {searchQuery && (
+                      <button
+                        onClick={() => setSearchQuery("")}
+                        className="absolute right-2.5 top-2 text-[#101820]/40 hover:text-[#101820]"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Custom Month & Date Picker */}
+                  <div className="flex items-center gap-2">
+                    {/* Month Picker */}
+                    <select
+                      value={(selectedMonthNum + 1).toString().padStart(2, "0")}
+                      onChange={(e) => {
+                        const mStr = e.target.value;
+                        const dayStr = selectedDate.split("-")[2] || "01";
+                        setSelectedDate(`${selectedYearNum}-${mStr}-${dayStr}`);
+                      }}
+                      className="bg-[#f4f1eb] border border-[#101820]/15 rounded-xl px-3 py-1.5 text-xs text-[#101820] font-medium outline-none focus:border-[#b99a6b]"
+                    >
+                      {MONTH_NAMES.map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+
+                    <input
+                      type="date"
+                      value={selectedDate}
+                      onChange={(e) => setSelectedDate(e.target.value)}
+                      className="bg-[#f4f1eb] border border-[#101820]/15 rounded-xl px-3 py-1.5 text-xs text-[#101820] outline-none focus:border-[#b99a6b]"
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* Quick Day Pill Bar */}
-              <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-                {dayQuickPills.map((pill) => {
-                  const countForDay = bookings.filter(
-                    (b) => b.date === pill.iso
-                  ).length;
-                  const isSelected = selectedDate === pill.iso;
-                  return (
+              {/* Quick Day Pill Bar — All days of the selected month (1..30/31) */}
+              <div className="space-y-2 pt-2 border-t border-[#101820]/10">
+                <div className="flex items-center justify-between text-xs font-medium text-[#101820]/60">
+                  <span className="uppercase tracking-wider text-[0.68rem] text-[#b99a6b] font-semibold">
+                    🗓️ Days of Month ({monthDaysPills.length} Days)
+                  </span>
+                  <div className="flex items-center p-1 rounded-xl bg-white border border-[#101820]/10 shadow-sm">
                     <button
-                      key={pill.iso}
-                      onClick={() => setSelectedDate(pill.iso)}
-                      className={`flex flex-col items-center py-2.5 px-4 rounded-xl transition-all whitespace-nowrap min-w-[5.5rem] border ${
-                        isSelected
-                          ? "bg-[#101820] text-[#f4f1eb] border-[#101820] shadow-md scale-[1.02]"
-                          : "bg-[#f4f1eb]/70 hover:bg-[#f4f1eb] border-[#101820]/10 text-[#101820]"
-                      }`}
+                      type="button"
+                      onClick={() => scrollDayPills("left")}
+                      className="p-1 rounded-lg text-[#101820]/60 hover:bg-[#101820] hover:text-white transition-colors"
+                      title="Scroll to earlier days"
                     >
-                      <span
-                        className={`text-[0.65rem] uppercase tracking-wider font-medium ${
-                          isSelected ? "text-[#b99a6b]" : "text-[#101820]/60"
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <div className="w-px h-3.5 bg-[#101820]/10 mx-0.5" />
+                    <button
+                      type="button"
+                      onClick={() => scrollDayPills("right")}
+                      className="p-1 rounded-lg text-[#101820]/60 hover:bg-[#101820] hover:text-white transition-colors"
+                      title="Scroll to later days"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div
+                  ref={dayPillsScrollRef}
+                  data-lenis-prevent
+                  className="flex items-center gap-2 overflow-x-auto pt-3 pb-2 scrollbar-none"
+                >
+                  {monthDaysPills.map((pill) => {
+                    const countForDay = bookings.filter(
+                      (b) => b.date === pill.iso
+                    ).length;
+                    const isSelected = selectedDate === pill.iso;
+                    return (
+                      <button
+                        key={pill.iso}
+                        data-iso={pill.iso}
+                        onClick={() => setSelectedDate(pill.iso)}
+                        className={`flex flex-col items-center py-2 px-3 rounded-xl transition-all whitespace-nowrap min-w-[4.2rem] border relative ${
+                          isSelected
+                            ? "bg-[#101820] text-[#f4f1eb] border-[#101820] shadow-md scale-[1.04]"
+                            : pill.isToday
+                            ? "bg-[#b99a6b]/15 border-[#b99a6b]/40 text-[#101820]"
+                            : "bg-[#f4f1eb]/70 hover:bg-[#f4f1eb] border-[#101820]/10 text-[#101820]"
                         }`}
                       >
-                        {pill.dayName}
-                      </span>
-                      <span className="font-serif text-sm font-semibold mt-0.5">
-                        {pill.dateFormatted}
-                      </span>
-                      {countForDay > 0 && (
+                        {pill.isToday && (
+                          <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 z-10 bg-[#b99a6b] text-[#101820] text-[0.52rem] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-full shadow-sm whitespace-nowrap">
+                            Today
+                          </span>
+                        )}
                         <span
-                          className={`mt-1 text-[0.62rem] px-2 py-0.5 rounded-full font-medium ${
-                            isSelected
-                              ? "bg-[#b99a6b] text-[#101820]"
-                              : "bg-[#101820]/10 text-[#101820]"
+                          className={`text-[0.62rem] uppercase tracking-wider font-medium ${
+                            isSelected ? "text-[#b99a6b]" : "text-[#101820]/60"
                           }`}
                         >
-                          {countForDay} patient{countForDay > 1 ? "s" : ""}
+                          {pill.dayName}
                         </span>
-                      )}
-                    </button>
-                  );
-                })}
+                        <span className="font-serif text-base font-bold mt-0.5">
+                          {pill.day}
+                        </span>
+                        {countForDay > 0 ? (
+                          <span
+                            className={`mt-0.5 text-[0.6rem] px-1.5 py-0.2 rounded-full font-semibold ${
+                              isSelected
+                                ? "bg-[#b99a6b] text-[#101820]"
+                                : "bg-[#101820]/15 text-[#101820]"
+                            }`}
+                          >
+                            {countForDay}
+                          </span>
+                        ) : (
+                          <span className="mt-0.5 text-[0.58rem] opacity-30">—</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -840,8 +1292,9 @@ export default function AdminPage() {
                 {agendaBookings.map((b) => (
                   <div
                     key={b.id}
-                    className="bg-white border border-[#101820]/10 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow flex flex-col lg:flex-row lg:items-center justify-between gap-6"
+                    className="bg-white border border-[#101820]/10 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow space-y-4"
                   >
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
                     {/* Patient Info & Details */}
                     <div className="space-y-3 flex-1">
                       <div className="flex flex-wrap items-center gap-3">
@@ -897,6 +1350,9 @@ export default function AdminPage() {
                               : "Online — Pending"
                             : "Pay at Clinic"}
                         </span>
+
+                        {/* Extra Charge Badge — add-on work billed on top of the base appointment */}
+                        {renderExtraChargeBadge(b)}
 
                         {/* Consultation flag — distinguishes it from a treatment */}
                         {isConsultation(b) && (
@@ -982,6 +1438,20 @@ export default function AdminPage() {
                           title="View Full Info"
                         >
                           <Eye className="w-4 h-4" />
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            editingExtraChargeId === b.id ? cancelEditExtraCharge() : startEditExtraCharge(b)
+                          }
+                          className={`p-1.5 rounded-xl border transition-colors ${
+                            editingExtraChargeId === b.id
+                              ? "bg-[#101820] text-white border-[#101820]"
+                              : "bg-[#f4f1eb] hover:bg-[#101820] hover:text-white border-[#101820]/15 text-[#101820]"
+                          }`}
+                          title="Add / edit extra charge"
+                        >
+                          <Receipt className="w-4 h-4" />
                         </button>
 
                         <button
@@ -1092,6 +1562,9 @@ export default function AdminPage() {
                       )}
                     </div>
                   </div>
+
+                  {renderExtraChargePanel(b)}
+                  </div>
                 ))}
               </div>
             )}
@@ -1126,8 +1599,58 @@ export default function AdminPage() {
                 ))}
               </div>
 
+              {/* Date Scope & Month/Year Filters */}
+              <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                {/* Date Preset */}
+                <select
+                  value={datePreset}
+                  onChange={(e) => setDatePreset(e.target.value)}
+                  className="bg-[#f4f1eb] border border-[#101820]/15 rounded-xl px-3 py-1.5 text-xs text-[#101820] font-medium outline-none focus:border-[#b99a6b]"
+                >
+                  <option value="all">📅 All Dates (جميع التواريخ)</option>
+                  <option value="today">⚡ Today (اليوم)</option>
+                  <option value="this_month">🗓️ This Month (هذا الشهر)</option>
+                  <option value="last_month">⏳ Last Month (الشهر الماضي)</option>
+                  <option value="this_year">🏛️ This Year (هذه السنة)</option>
+                </select>
+
+                {/* Month Dropdown */}
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => {
+                    setSelectedMonth(e.target.value);
+                    setDatePreset("all");
+                  }}
+                  className="bg-[#f4f1eb] border border-[#101820]/15 rounded-xl px-3 py-1.5 text-xs text-[#101820] font-medium outline-none focus:border-[#b99a6b]"
+                >
+                  <option value="all">Month: All (كل الشهور)</option>
+                  {MONTH_NAMES.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Year Dropdown */}
+                <select
+                  value={selectedYear}
+                  onChange={(e) => {
+                    setSelectedYear(e.target.value);
+                    setDatePreset("all");
+                  }}
+                  className="bg-[#f4f1eb] border border-[#101820]/15 rounded-xl px-3 py-1.5 text-xs text-[#101820] font-medium outline-none focus:border-[#b99a6b]"
+                >
+                  <option value="all">Year: All (كل السنين)</option>
+                  {availableYears.map((yr) => (
+                    <option key={yr} value={yr}>
+                      Year {yr}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {/* Search Box */}
-              <div className="relative w-full md:w-72">
+              <div className="relative w-full md:w-64">
                 <Search className="absolute left-3.5 top-2.5 w-4 h-4 text-[#101820]/40" />
                 <input
                   type="text"
@@ -1254,6 +1777,9 @@ export default function AdminPage() {
                                   : "Online — Pending"
                                 : "Pending — Pay at Clinic"}
                             </span>
+                            {b.extra_charge_amount ? (
+                              <div className="mt-1.5">{renderExtraChargeBadge(b)}</div>
+                            ) : null}
                           </td>
 
                           {/* Arrival */}
@@ -1350,9 +1876,28 @@ export default function AdminPage() {
                     <strong className="text-[#101820]">{consultationBookings.length}</strong>) plus
                     completed exams whose patient has a consultation to follow (
                     <strong className="text-[#101820]">{completedExamsWithConsultation.length}</strong>).
-                    Use the <span className="font-medium">✕</span> on a follow-up to remove it from this list.
                   </p>
                 </div>
+              </div>
+
+              {/* Search Box for Consultations */}
+              <div className="relative w-full sm:w-72">
+                <Search className="absolute left-3.5 top-2.5 w-4 h-4 text-[#101820]/40" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search consultation by phone, patient name..."
+                  className="w-full bg-[#f4f1eb] border border-[#101820]/15 rounded-xl pl-10 pr-8 py-2 text-xs text-[#101820] placeholder-[#101820]/40 outline-none focus:border-[#b99a6b] transition-colors"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2.5 top-2.5 text-[#101820]/40 hover:text-[#101820]"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1631,220 +2176,283 @@ export default function AdminPage() {
         )}
       </div>
 
-      {/* ── MODAL 1: VIEW BOOKING DETAILS ───────────────────────────────────── */}
+      {/* ── MODAL 1: PATIENT RECORD & COMPLETE HISTORY (EYE ICON 👁️) ─────────── */}
       {selectedBooking && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#101820]/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="relative w-full max-w-lg bg-white border border-[#101820]/15 rounded-3xl p-6 shadow-2xl space-y-6">
-            <div className="flex items-center justify-between border-b border-[#101820]/10 pb-4">
-              <div>
-                <span className="text-[0.65rem] font-medium uppercase tracking-[0.2em] text-[#b99a6b]">
-                  {isConsultation(selectedBooking) ? "Consultation" : "Appointment"} Details #{selectedBooking.id}
-                </span>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <h3 className="font-serif text-xl font-medium text-[#101820]">
-                    {selectedBooking.full_name}
-                  </h3>
-                  {isConsultation(selectedBooking) && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#b99a6b] text-[#101820] text-[0.62rem] font-semibold uppercase tracking-wider">
-                      <Stethoscope className="w-3 h-3" />
-                      Consultation
+          <div
+            data-lenis-prevent
+            className="relative w-full max-w-2xl bg-white border border-[#101820]/15 rounded-3xl p-6 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto custom-scrollbar"
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-[#101820]/10 pb-4 sticky top-0 bg-white z-10">
+              <div className="flex items-center gap-3">
+                <div className="h-12 w-12 rounded-2xl bg-[#101820] text-[#b99a6b] flex items-center justify-center font-serif text-xl font-bold shadow-sm">
+                  {selectedBooking.full_name.substring(0, 2).toUpperCase()}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-serif text-xl font-medium text-[#101820]">
+                      {selectedBooking.full_name}
+                    </h3>
+                    <span className="text-xs text-[#b99a6b] font-medium bg-[#b99a6b]/15 px-2.5 py-0.5 rounded-full">
+                      Patient Record
                     </span>
-                  )}
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-[#101820]/60 mt-0.5 font-mono">
+                    <span>📞 {selectedBooking.phone}</span>
+                    {selectedBooking.email && <span>✉️ {selectedBooking.email}</span>}
+                  </div>
                 </div>
               </div>
               <button
                 onClick={() => setSelectedBooking(null)}
-                className="p-1.5 rounded-full bg-[#f4f1eb] hover:bg-[#101820] hover:text-white text-[#101820]/60 transition-colors"
+                className="p-2 rounded-full bg-[#f4f1eb] hover:bg-[#101820] hover:text-white text-[#101820]/60 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Content Details */}
-            <div className="space-y-4 text-sm">
-              <div className="grid grid-cols-2 gap-4 bg-[#f4f1eb]/70 rounded-2xl p-4 border border-[#101820]/10">
-                <div>
-                  <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50">
-                    Service
-                  </span>
-                  <span className="font-serif text-base text-[#b99a6b] font-medium">
-                    {selectedBooking.treatment}
-                  </span>
-                </div>
-
-                <div>
-                  <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50">
-                    Status
-                  </span>
-                  <span
-                    className={`inline-block mt-1 text-xs px-2.5 py-0.5 rounded-full font-medium ${
-                      selectedBooking.status === "confirmed"
-                        ? "bg-emerald-500/20 text-emerald-800"
-                        : selectedBooking.status === "completed"
-                        ? "bg-blue-500/20 text-blue-800"
-                        : selectedBooking.status === "cancelled"
-                        ? "bg-red-500/20 text-red-700"
-                        : "bg-amber-500/20 text-amber-800"
-                    }`}
-                  >
-                    {selectedBooking.status.toUpperCase()}
-                  </span>
-                </div>
-
-                <div>
-                  <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50">
-                    Date
-                  </span>
-                  <span className="text-[#101820] font-medium">
-                    {selectedBooking.date}
-                  </span>
-                </div>
-
-                <div>
-                  <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50">
-                    Time
-                  </span>
-                  <span className="text-[#101820] font-medium">
-                    {formatEstimatedTime(selectedBooking)}
-                  </span>
-                </div>
-
-                <div>
-                  <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50">
-                    Queue Number
-                  </span>
-                  <span className="text-[#101820] font-medium">
-                    #{selectedBooking.queue_number ?? "—"}
-                  </span>
-                </div>
-
-                <div>
-                  <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50">
-                    Booked On
-                  </span>
-                  <span className="text-[#101820] font-medium">
-                    {formatCreatedAt(selectedBooking.created_at)}
-                  </span>
-                </div>
-
-                <div>
-                  <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50">
-                    Payment
-                  </span>
-                  <span className="text-[#101820] font-medium">
-                    {selectedBooking.payment_method === "online" ? "Online" : "Pay at Clinic"} —{" "}
-                    {selectedBooking.payment_status === "paid" ? "Paid" : "Pending"}
-                  </span>
-                </div>
-
-                <div>
-                  <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50">
-                    Arrival
-                  </span>
-                  <span className="text-[#101820] font-medium">
-                    {selectedBooking.patient_arrived ? "Entered" : "Not Entered"}
-                  </span>
-                </div>
-              </div>
-
-              {/* Completed exam whose patient has a consultation — with a
-                  yes/no toggle so it can be hidden and brought back. */}
-              {examsWithMatchedConsultation.has(selectedBooking.id) && (
-                <div
-                  className={`flex items-start gap-2 p-3.5 rounded-xl border text-xs ${
-                    selectedBooking.consultation_hint_dismissed
-                      ? "bg-[#f4f1eb] border-[#101820]/10 text-[#101820]/60"
-                      : "bg-[#b99a6b]/15 border-[#b99a6b]/40 text-[#101820]"
-                  }`}
-                >
-                  <Stethoscope
-                    className={`w-4 h-4 shrink-0 mt-0.5 ${
-                      selectedBooking.consultation_hint_dismissed ? "text-[#101820]/40" : "text-[#b99a6b]"
-                    }`}
-                  />
-                  <span className="flex-1">
-                    This patient also has a <strong className="font-semibold">consultation</strong>{" "}
-                    booked for{" "}
-                    <strong className="font-semibold">
-                      {examsWithMatchedConsultation.get(selectedBooking.id)?.date}
-                    </strong>{" "}
-                    (status: {examsWithMatchedConsultation.get(selectedBooking.id)?.status}) — it takes
-                    place after this exam.
-                    {selectedBooking.consultation_hint_dismissed && " — currently hidden from the lists."}
-                  </span>
-                  <button
-                    onClick={() =>
-                      handleSetConsultationHint(
-                        selectedBooking.id,
-                        !selectedBooking.consultation_hint_dismissed
-                      )
-                    }
-                    className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
-                      selectedBooking.consultation_hint_dismissed
-                        ? "bg-[#b99a6b] text-[#101820] hover:bg-[#b99a6b]/85"
-                        : "bg-white/60 border border-[#101820]/15 text-[#101820]/70 hover:bg-red-500/10 hover:text-red-700"
-                    }`}
-                  >
-                    {selectedBooking.consultation_hint_dismissed ? "Show" : "Remove"}
-                  </button>
-                </div>
-              )}
-
-              {/* Contact Actions */}
-              <div className="space-y-2">
-                <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50">
-                  Contact Links
+            {/* Patient Overview Stats Bar */}
+            <div className="grid grid-cols-3 gap-3 bg-[#f4f1eb] rounded-2xl p-4 border border-[#101820]/10 text-center">
+              <div>
+                <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50 font-medium">
+                  Total Visits (إجمالي الزيارات)
                 </span>
-                <div className="flex flex-wrap gap-2">
-                  <a
-                    href={`tel:${selectedBooking.phone}`}
-                    className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-[#f4f1eb] border border-[#101820]/15 hover:bg-[#101820] hover:text-white text-xs transition-colors"
-                  >
-                    <PhoneCall className="w-3.5 h-3.5 text-[#b99a6b]" />
-                    <span>Call {selectedBooking.phone}</span>
-                  </a>
-
-                  <a
-                    href={`https://wa.me/${selectedBooking.phone.replace(/[^0-9]/g, "")}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-800 hover:bg-emerald-500/20 text-xs transition-colors"
-                  >
-                    <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>WhatsApp</span>
-                  </a>
-                </div>
+                <span className="font-serif text-xl font-bold text-[#101820]">
+                  {selectedPatientVisits.length} Visit{selectedPatientVisits.length > 1 ? "s" : ""}
+                </span>
               </div>
-
-              {/* Message Note */}
-              {selectedBooking.message && (
-                <div>
-                  <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50 mb-1">
-                    Patient Note
-                  </span>
-                  <div className="p-3.5 rounded-xl bg-[#f4f1eb]/70 border border-[#101820]/10 text-xs text-[#101820]/80 italic leading-relaxed">
-                    &ldquo;{selectedBooking.message}&rdquo;
-                  </div>
-                </div>
-              )}
+              <div>
+                <span className="block text-[0.65rem] uppercase tracking-wider text-emerald-800 font-medium">
+                  Completed (الزيارات المكتملة)
+                </span>
+                <span className="font-serif text-xl font-bold text-emerald-700">
+                  {selectedPatientVisits.filter((v) => v.status === "completed").length}
+                </span>
+              </div>
+              <div>
+                <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50 font-medium">
+                  First Visit (أول زيارة)
+                </span>
+                <span className="font-serif text-sm font-semibold text-[#101820] mt-1 block">
+                  {selectedPatientVisits[selectedPatientVisits.length - 1]?.date || "—"}
+                </span>
+              </div>
             </div>
 
-            {/* Footer Action */}
-            <div className="flex items-center justify-between border-t border-[#101820]/10 pt-4">
-              <span className="text-xs text-[#101820]/50">Quick Status Update:</span>
+            {/* Quick Contact & Action Buttons */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#101820]/10 pb-4">
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleStatusChange(selectedBooking.id, "confirmed")}
-                  className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-colors shadow-sm"
+                <a
+                  href={`tel:${selectedBooking.phone}`}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#f4f1eb] border border-[#101820]/15 hover:bg-[#101820] hover:text-white text-xs text-[#101820] font-medium transition-colors"
                 >
-                  Confirm
-                </button>
-                <button
-                  onClick={() => handleStatusChange(selectedBooking.id, "completed")}
-                  className="px-3 py-1.5 rounded-xl bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 transition-colors shadow-sm"
+                  <PhoneCall className="w-3.5 h-3.5 text-[#b99a6b]" />
+                  <span>Call {selectedBooking.phone}</span>
+                </a>
+                <a
+                  href={`https://wa.me/${selectedBooking.phone.replace(/[^0-9]/g, "")}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-800 hover:bg-emerald-500/20 text-xs font-medium transition-colors"
                 >
-                  Complete
-                </button>
+                  <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>WhatsApp Chat</span>
+                </a>
+              </div>
+
+              <button
+                onClick={() => {
+                  setNewForm({
+                    full_name: selectedBooking.full_name,
+                    phone: selectedBooking.phone,
+                    email: selectedBooking.email || "",
+                    treatment: TREATMENT_OPTIONS[0],
+                    date: new Date().toISOString().split("T")[0],
+                    message: "",
+                  });
+                  setSelectedBooking(null);
+                  setShowNewModal(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#101820] text-[#f4f1eb] text-xs font-medium hover:bg-[#101820]/85 transition-colors shadow-sm"
+              >
+                <Plus className="w-3.5 h-3.5 text-[#b99a6b]" />
+                <span>Book Next Visit</span>
+              </button>
+            </div>
+
+            {/* Complete Patient Medical & Booking History List */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="font-serif text-base font-medium text-[#101820] flex items-center gap-2">
+                  <CalendarIcon className="w-4 h-4 text-[#b99a6b]" />
+                  Patient Medical & Visit History (سجل الحجوزات والزيارات)
+                </h4>
+                <span className="text-xs text-[#101820]/50 font-mono">
+                  {selectedPatientVisits.length} Record{selectedPatientVisits.length > 1 ? "s" : ""}
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                {selectedPatientVisits.map((visit, index) => (
+                  <div
+                    key={visit.id}
+                    className={`p-4 rounded-2xl border transition-all ${
+                      visit.id === selectedBooking.id
+                        ? "bg-[#b99a6b]/10 border-[#b99a6b]/40 ring-1 ring-[#b99a6b]/30"
+                        : "bg-white border-[#101820]/10 hover:border-[#101820]/25"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#101820]/10 pb-2.5 mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-serif font-bold text-[#101820]">
+                          Visit #{selectedPatientVisits.length - index}
+                        </span>
+                        <span className="text-xs text-[#101820]/40">•</span>
+                        <span className="text-xs font-medium text-[#101820] flex items-center gap-1">
+                          <CalendarIcon className="w-3 h-3 text-[#b99a6b]" /> {visit.date}
+                        </span>
+                        <span className="text-xs text-[#101820]/40">•</span>
+                        <span className="text-xs text-[#101820]/70">
+                          {formatEstimatedTime(visit)}
+                        </span>
+                      </div>
+
+                      {/* Status Badge */}
+                      <span
+                        className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${
+                          visit.status === "confirmed"
+                            ? "bg-emerald-500/15 border border-emerald-500/30 text-emerald-800"
+                            : visit.status === "completed"
+                            ? "bg-blue-500/15 border border-blue-500/30 text-blue-800"
+                            : visit.status === "cancelled"
+                            ? "bg-red-500/15 border border-red-500/30 text-red-700"
+                            : "bg-amber-500/15 border border-amber-500/30 text-amber-800"
+                        }`}
+                      >
+                        ● {visit.status.toUpperCase()}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs mb-3">
+                      <div>
+                        <span className="block text-[0.62rem] uppercase tracking-wider text-[#101820]/50">
+                          Service / Treatment
+                        </span>
+                        <span className="font-serif font-medium text-[#b99a6b] text-sm">
+                          {visit.treatment}
+                        </span>
+                      </div>
+
+                      <div>
+                        <span className="block text-[0.62rem] uppercase tracking-wider text-[#101820]/50">
+                          Queue Number
+                        </span>
+                        <span className="font-semibold text-[#101820]">
+                          #{visit.queue_number ?? "—"}
+                        </span>
+                      </div>
+
+                      <div>
+                        <span className="block text-[0.62rem] uppercase tracking-wider text-[#101820]/50">
+                          Payment Method
+                        </span>
+                        <span className="text-[#101820]">
+                          {visit.payment_method === "online" ? "Online" : "Pay at Clinic"}
+                        </span>
+                      </div>
+
+                      <div>
+                        <span className="block text-[0.62rem] uppercase tracking-wider text-[#101820]/50">
+                          Patient Arrival
+                        </span>
+                        <span
+                          className={`font-medium ${
+                            visit.patient_arrived ? "text-emerald-700" : "text-[#101820]/60"
+                          }`}
+                        >
+                          {visit.patient_arrived ? "✓ Entered" : "Not Entered"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Message / Patient Note */}
+                    {visit.message && (
+                      <div className="p-2.5 rounded-xl bg-[#f4f1eb] text-xs text-[#101820]/80 italic mb-3">
+                        &ldquo;{visit.message}&rdquo;
+                      </div>
+                    )}
+
+                    {/* Extra Charge — add-on work billed on top of this visit */}
+                    <div className="flex items-center justify-between gap-2 border-t border-[#101820]/10 pt-3 mb-3">
+                      <div className="flex items-center gap-2">
+                        {renderExtraChargeBadge(visit) || (
+                          <span className="inline-flex items-center gap-1.5 text-xs text-[#101820]/40">
+                            <Receipt className="w-3.5 h-3.5 text-[#101820]/25" />
+                            No extra charge on this visit
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() =>
+                          editingExtraChargeId === visit.id ? cancelEditExtraCharge() : startEditExtraCharge(visit)
+                        }
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                          editingExtraChargeId === visit.id
+                            ? "bg-[#101820] text-white"
+                            : visit.extra_charge_amount
+                            ? "bg-[#f4f1eb] text-[#101820]/70 hover:bg-[#b99a6b]/20 hover:text-[#101820]"
+                            : "bg-[#b99a6b]/15 text-[#101820] border border-[#b99a6b]/30 hover:bg-[#b99a6b]/25"
+                        }`}
+                      >
+                        <Receipt className="w-3.5 h-3.5" />
+                        {visit.extra_charge_amount ? "Edit Charge" : "Add Charge"}
+                      </button>
+                    </div>
+                    {renderExtraChargePanel(visit) && (
+                      <div className="mb-3">{renderExtraChargePanel(visit)}</div>
+                    )}
+
+                    {/* Status Update Control for this visit */}
+                    <div className="flex items-center justify-between border-t border-[#101820]/10 pt-2.5">
+                      <span className="text-[0.65rem] text-[#101820]/50 uppercase tracking-wider">
+                        Update Status:
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleStatusChange(visit.id, "confirmed")}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                            visit.status === "confirmed"
+                              ? "bg-emerald-600 text-white shadow"
+                              : "bg-[#f4f1eb] text-[#101820]/70 hover:bg-emerald-500/10 hover:text-emerald-800"
+                          }`}
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          onClick={() => handleStatusChange(visit.id, "completed")}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                            visit.status === "completed"
+                              ? "bg-blue-600 text-white shadow"
+                              : "bg-[#f4f1eb] text-[#101820]/70 hover:bg-blue-500/10 hover:text-blue-800"
+                          }`}
+                        >
+                          Complete
+                        </button>
+                        <button
+                          onClick={() => handleStatusChange(visit.id, "cancelled")}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                            visit.status === "cancelled"
+                              ? "bg-red-600 text-white shadow"
+                              : "bg-[#f4f1eb] text-[#101820]/70 hover:bg-red-500/10 hover:text-red-700"
+                          }`}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
