@@ -4,8 +4,15 @@ import { useRef, useState } from "react";
 import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { PRINCIPLES } from "@/lib/constants";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function WhyChooseUs() {
+  const { t } = useLanguage();
+  const localizedPrinciples = PRINCIPLES.map((p, i) => ({
+    ...p,
+    title: t(`site.whyChooseUs.p${i + 1}Title`),
+    description: t(`site.whyChooseUs.p${i + 1}Desc`),
+  }));
   const sectionRef = useRef<HTMLElement>(null);
   // -1 = all active (reduced motion); otherwise the single active index.
   const [active, setActive] = useState(0);
@@ -75,12 +82,12 @@ export function WhyChooseUs() {
         <div>
           <p className="wc-head mb-8 flex items-center gap-3 text-[0.7rem] font-medium uppercase tracking-[0.32em] text-cream/45">
             <span className="h-px w-8 bg-gold" aria-hidden="true" />
-            Why Lumina
+            {t("site.whyChooseUs.eyebrow")}
           </p>
           <h2 className="wc-head font-serif text-[2.5rem] font-medium leading-[1.02] tracking-[-0.02em] text-cream sm:text-5xl lg:text-6xl">
-            Care that goes
+            {t("site.whyChooseUs.headingLine1")}
             <br />
-            <span className="italic text-cream/85">beyond the chair.</span>
+            <span className="italic text-cream/85">{t("site.whyChooseUs.headingLine2")}</span>
           </h2>
           <p className="wc-head mt-10 flex items-center gap-3 font-serif text-lg text-cream/50 tabular-nums">
             <span className="text-gold">
@@ -93,7 +100,7 @@ export function WhyChooseUs() {
 
         {/* Right — principles */}
         <ul className="wc-head">
-          {PRINCIPLES.map((p, i) => {
+          {localizedPrinciples.map((p, i) => {
             const isActive = active === -1 || i === active;
             return (
               <li

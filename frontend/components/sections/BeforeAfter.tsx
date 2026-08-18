@@ -6,8 +6,10 @@ import { ChevronsLeftRight, Sparkles } from "lucide-react";
 import { Grain } from "@/components/ui/Grain";
 import { BEFORE_AFTER_CASES } from "@/lib/constants";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function BeforeAfter() {
+  const { t } = useLanguage();
   const sectionRef = useRef<HTMLElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const beforeRef = useRef<HTMLDivElement>(null);
@@ -16,8 +18,14 @@ export function BeforeAfter() {
   const dragging = useRef(false);
   const pos = useRef(50);
 
+  const localizedCases = BEFORE_AFTER_CASES.map((c, i) => ({
+    ...c,
+    treatment: t(`site.beforeAfter.case${i + 1}Treatment`),
+    description: t(`site.beforeAfter.case${i + 1}Desc`),
+  }));
+
   const [activeCase, setActiveCase] = useState(0);
-  const active = BEFORE_AFTER_CASES[activeCase];
+  const active = localizedCases[activeCase];
 
   const applyPos = (p: number) => {
     const clamped = Math.max(1, Math.min(99, p));
@@ -110,18 +118,18 @@ export function BeforeAfter() {
         <div className="mb-12 md:mb-16">
           <p className="ba-head mb-8 flex items-center gap-3 text-[0.7rem] font-medium uppercase tracking-[0.32em] text-ink/50">
             <span className="h-px w-8 bg-gold" aria-hidden="true" />
-            Before / After
+            {t("site.beforeAfter.eyebrow")}
           </p>
           <h2 className="ba-head max-w-3xl font-serif text-[2.5rem] font-medium leading-[1.02] tracking-[-0.02em] text-ink sm:text-5xl lg:text-6xl">
-            Real smiles.
+            {t("site.beforeAfter.headingLine1")}
             <br />
-            <span className="italic text-ink/90">Real transformations.</span>
+            <span className="italic text-ink/90">{t("site.beforeAfter.headingLine2")}</span>
           </h2>
         </div>
 
         {/* Case selector */}
         <div className="ba-head mb-8 flex flex-wrap gap-x-8 gap-y-3">
-          {BEFORE_AFTER_CASES.map((c, i) => (
+          {localizedCases.map((c, i) => (
             <button
               key={c.id}
               type="button"
@@ -155,7 +163,7 @@ export function BeforeAfter() {
             <div className="absolute inset-0">
               <img
                 src={active.after}
-                alt={`${active.treatment} After`}
+                alt={`${active.treatment} ${t("site.beforeAfter.after")}`}
                 loading="lazy"
                 decoding="async"
                 className="h-full w-full object-cover"
@@ -168,7 +176,7 @@ export function BeforeAfter() {
               />
               <Grain opacity={0.08} />
               <span className="absolute right-5 top-5 rounded-full bg-ink/10 px-3 py-1.5 text-[0.6rem] font-medium uppercase tracking-[0.22em] text-ink/70 backdrop-blur-sm">
-                After
+                {t("site.beforeAfter.after")}
               </span>
             </div>
 
@@ -180,7 +188,7 @@ export function BeforeAfter() {
             >
               <img
                 src={active.before}
-                alt={`${active.treatment} Before`}
+                alt={`${active.treatment} ${t("site.beforeAfter.before")}`}
                 loading="lazy"
                 decoding="async"
                 className="h-full w-full object-cover"
@@ -188,7 +196,7 @@ export function BeforeAfter() {
               <div className="absolute inset-0 bg-ink/10" />
               <Grain opacity={0.12} />
               <span className="absolute left-5 top-5 rounded-full bg-ink/25 px-3 py-1.5 text-[0.6rem] font-medium uppercase tracking-[0.22em] text-cream/90 backdrop-blur-sm">
-                Before
+                {t("site.beforeAfter.before")}
               </span>
             </div>
 
@@ -203,7 +211,7 @@ export function BeforeAfter() {
                 ref={sliderBtnRef}
                 type="button"
                 role="slider"
-                aria-label={`Reveal before and after — ${active.treatment}`}
+                aria-label={t("site.beforeAfter.sliderAria", { treatment: active.treatment })}
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={50}
@@ -228,7 +236,7 @@ export function BeforeAfter() {
         </figure>
 
         <p className="mt-8 text-[0.68rem] uppercase tracking-[0.18em] text-ink/35">
-          Illustrative demonstration — not actual patient results.
+          {t("site.beforeAfter.disclaimer")}
         </p>
       </div>
     </section>

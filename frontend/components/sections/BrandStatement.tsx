@@ -3,10 +3,11 @@
 import { useRef } from "react";
 import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
-
-const LINES = ["Dentistry,", "designed", "around you."];
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function BrandStatement() {
+  const { t } = useLanguage();
+  const LINES = [t("site.brandStatement.line1"), t("site.brandStatement.line2"), t("site.brandStatement.line3")];
   const sectionRef = useRef<HTMLElement>(null);
 
   useIsoLayoutEffect(() => {
@@ -42,7 +43,7 @@ export function BrandStatement() {
         {/* Eyebrow */}
         <p className="bs-fade mb-10 flex items-center gap-3 text-[0.7rem] font-medium uppercase tracking-[0.32em] text-ink/50 md:mb-14">
           <span className="h-px w-8 bg-gold" aria-hidden="true" />
-          Our Philosophy
+          {t("site.brandStatement.eyebrow")}
         </p>
 
         <div className="grid gap-12 lg:grid-cols-[1.4fr_0.6fr] lg:items-end lg:gap-16">
@@ -59,8 +60,7 @@ export function BrandStatement() {
 
           {/* Supporting text */}
           <p className="bs-fade max-w-md text-base leading-relaxed text-ink/60 sm:text-lg lg:pb-4">
-            Modern dental care combining clinical expertise, thoughtful
-            technology, and a comfortable patient experience.
+            {t("site.brandStatement.description")}
           </p>
         </div>
       </div>

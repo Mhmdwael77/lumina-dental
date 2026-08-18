@@ -6,8 +6,14 @@ import { ArrowUpRight, Clock, Mail, MapPin, MessageCircle, Phone } from "lucide-
 import { Grain } from "@/components/ui/Grain";
 import { CLINIC } from "@/lib/constants";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function Contact() {
+  const { t } = useLanguage();
+  const localizedHours = [
+    { days: t("site.contact.hoursWeekdays"), time: t("site.contact.hoursWeekdaysTime") },
+    { days: t("site.contact.hoursFriday"), time: t("site.contact.hoursFridayTime") },
+  ];
   const sectionRef = useRef<HTMLElement>(null);
 
   useIsoLayoutEffect(() => {
@@ -35,10 +41,10 @@ export function Contact() {
         <div className="mb-14 md:mb-20">
           <p className="ct-reveal mb-8 flex items-center gap-3 text-[0.7rem] font-medium uppercase tracking-[0.32em] text-ink/50">
             <span className="h-px w-8 bg-gold" aria-hidden="true" />
-            Contact
+            {t("site.contact.eyebrow")}
           </p>
           <h2 className="ct-reveal font-serif text-[2.5rem] font-medium leading-[1.02] tracking-[-0.02em] text-ink sm:text-5xl lg:text-6xl">
-            Visit our <em className="italic text-ink/90">clinic.</em>
+            {t("site.contact.headingPrefix")} <em className="italic text-ink/90">{t("site.contact.headingSuffix")}</em>
           </h2>
         </div>
 
@@ -54,7 +60,7 @@ export function Contact() {
                 <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-gold" strokeWidth={1.5} aria-hidden="true" />
                 <div>
                   <dt className="text-[0.68rem] font-medium uppercase tracking-[0.18em] text-ink/40">
-                    Address
+                    {t("site.contact.address")}
                   </dt>
                   <dd className="mt-1 text-ink/80">{CLINIC.address}</dd>
                 </div>
@@ -64,9 +70,9 @@ export function Contact() {
                 <Clock className="mt-0.5 h-5 w-5 shrink-0 text-gold" strokeWidth={1.5} aria-hidden="true" />
                 <div>
                   <dt className="text-[0.68rem] font-medium uppercase tracking-[0.18em] text-ink/40">
-                    Opening Hours
+                    {t("site.contact.openingHours")}
                   </dt>
-                  {CLINIC.hours.map((h) => (
+                  {localizedHours.map((h) => (
                     <dd key={h.days} className="mt-1 flex flex-wrap gap-x-3 text-ink/80">
                       <span>{h.days}</span>
                       <span className="text-ink/50">{h.time}</span>
@@ -79,7 +85,7 @@ export function Contact() {
                 <Phone className="mt-0.5 h-5 w-5 shrink-0 text-gold" strokeWidth={1.5} aria-hidden="true" />
                 <div>
                   <dt className="text-[0.68rem] font-medium uppercase tracking-[0.18em] text-ink/40">
-                    Phone
+                    {t("site.contact.phone")}
                   </dt>
                   <dd className="mt-1">
                     <a href={CLINIC.phoneHref} className="text-ink/80 transition-colors hover:text-ink">
@@ -93,7 +99,7 @@ export function Contact() {
                 <Mail className="mt-0.5 h-5 w-5 shrink-0 text-gold" strokeWidth={1.5} aria-hidden="true" />
                 <div>
                   <dt className="text-[0.68rem] font-medium uppercase tracking-[0.18em] text-ink/40">
-                    Email
+                    {t("site.contact.email")}
                   </dt>
                   <dd className="mt-1">
                     <a href={`mailto:${CLINIC.email}`} className="text-ink/80 transition-colors hover:text-ink">
@@ -112,7 +118,7 @@ export function Contact() {
                 rel="noopener noreferrer"
                 className="group inline-flex items-center justify-center gap-2 rounded-full bg-ink px-6 py-3.5 text-xs font-medium uppercase tracking-[0.2em] text-cream transition-all duration-300 hover:bg-ink/85 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold"
               >
-                Get Directions
+                {t("site.contact.getDirections")}
                 <ArrowUpRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" strokeWidth={1.5} aria-hidden="true" />
               </a>
               <a
@@ -120,7 +126,7 @@ export function Contact() {
                 className="inline-flex items-center justify-center gap-2 rounded-full border border-ink/15 px-6 py-3.5 text-xs font-medium uppercase tracking-[0.2em] text-ink transition-colors duration-300 hover:border-ink/40 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold"
               >
                 <Phone className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-                Call Clinic
+                {t("site.contact.callClinic")}
               </a>
               <a
                 href={CLINIC.whatsapp}
@@ -129,7 +135,7 @@ export function Contact() {
                 className="inline-flex items-center justify-center gap-2 rounded-full border border-ink/15 px-6 py-3.5 text-xs font-medium uppercase tracking-[0.2em] text-ink transition-colors duration-300 hover:border-ink/40 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold"
               >
                 <MessageCircle className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-                WhatsApp
+                {t("site.contact.whatsapp")}
               </a>
             </div>
           </div>
@@ -140,7 +146,7 @@ export function Contact() {
               href={CLINIC.directions}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label="Open clinic location in maps"
+              aria-label={t("site.contact.mapAria")}
               className="group relative block aspect-[4/3] w-full overflow-hidden rounded-2xl focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold lg:aspect-auto lg:h-full lg:min-h-[26rem]"
             >
               <div

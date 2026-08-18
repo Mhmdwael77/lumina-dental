@@ -5,8 +5,10 @@ import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { CountUp } from "@/components/ui/CountUp";
 import { STATS } from "@/lib/constants";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function TrustStats() {
+  const { t } = useLanguage();
   const sectionRef = useRef<HTMLElement>(null);
 
   useIsoLayoutEffect(() => {
@@ -33,7 +35,7 @@ export function TrustStats() {
       <div className="mx-auto max-w-[110rem]">
         <p className="mb-16 flex items-center justify-center gap-3 text-center text-[0.7rem] font-medium uppercase tracking-[0.32em] text-cream/45 md:mb-20">
           <span className="h-px w-8 bg-gold" aria-hidden="true" />
-          A track record you can trust
+          {t("site.trustStats.eyebrow")}
           <span className="h-px w-8 bg-gold" aria-hidden="true" />
         </p>
 
@@ -50,7 +52,7 @@ export function TrustStats() {
                 <span className="text-gold">{stat.suffix}</span>
               </dd>
               <dt className="mt-5 text-[0.68rem] font-medium uppercase tracking-[0.22em] text-cream/50">
-                {stat.label}
+                {t(`site.trustStats.stat${i}`)}
               </dt>
             </div>
           ))}

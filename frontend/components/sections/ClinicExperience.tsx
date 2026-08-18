@@ -7,8 +7,14 @@ import { Grain } from "@/components/ui/Grain";
 import { CLINIC_IMAGES } from "@/lib/constants";
 import { getLenis } from "@/lib/lenis";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function ClinicExperience() {
+  const { t } = useLanguage();
+  const localizedImages = CLINIC_IMAGES.map((item, i) => ({
+    ...item,
+    label: t(`site.clinicExperience.img${i + 1}`),
+  }));
   const sectionRef = useRef<HTMLElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -105,10 +111,10 @@ export function ClinicExperience() {
         <div className="mx-auto w-full max-w-[110rem] px-6 md:px-10 lg:px-14 lg:pt-28">
           <p className="ce-head mb-6 flex items-center gap-3 text-[0.7rem] font-medium uppercase tracking-[0.32em] text-ink/50">
             <span className="h-px w-8 bg-gold" aria-hidden="true" />
-            The Experience
+            {t("site.clinicExperience.eyebrow")}
           </p>
           <h2 className="ce-head font-serif text-[2.5rem] font-medium leading-[1.02] tracking-[-0.02em] text-ink sm:text-5xl lg:text-6xl">
-            Step inside <em className="italic text-ink/90">Lumina.</em>
+            {t("site.clinicExperience.headingPrefix")} <em className="italic text-ink/90">{t("site.clinicExperience.headingSuffix")}</em>
           </h2>
         </div>
 
@@ -122,7 +128,7 @@ export function ClinicExperience() {
               ref={trackRef}
               className="flex h-full items-center gap-5 px-6 md:gap-6 md:px-10 lg:px-14"
             >
-              {CLINIC_IMAGES.map((item) => (
+              {localizedImages.map((item) => (
               <figure
                 key={item.number}
                 className="relative aspect-[3/4] h-[58svh] w-[80vw] shrink-0 snap-center overflow-hidden rounded-2xl sm:w-[62vw] md:aspect-[4/5] lg:aspect-[3/4] lg:h-[64svh] lg:w-[40vw] xl:w-[34vw]"
@@ -155,7 +161,7 @@ export function ClinicExperience() {
           {/* Side navigation */}
           <button
             type="button"
-            aria-label="Previous image"
+            aria-label={t("site.clinicExperience.prevImage")}
             onClick={() => nudge(-1)}
             className="absolute left-4 top-1/2 z-20 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-cream/95 text-ink shadow-[0_10px_30px_-10px_rgba(16,24,32,0.5)] backdrop-blur transition-transform duration-200 hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold md:left-6 md:h-12 md:w-12 lg:left-10"
           >
@@ -163,7 +169,7 @@ export function ClinicExperience() {
           </button>
           <button
             type="button"
-            aria-label="Next image"
+            aria-label={t("site.clinicExperience.nextImage")}
             onClick={() => nudge(1)}
             className="absolute right-4 top-1/2 z-20 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-cream/95 text-ink shadow-[0_10px_30px_-10px_rgba(16,24,32,0.5)] backdrop-blur transition-transform duration-200 hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold md:right-6 md:h-12 md:w-12 lg:right-10"
           >
@@ -173,8 +179,8 @@ export function ClinicExperience() {
 
         {/* Hint */}
         <p className="ce-head mx-auto mt-8 w-full max-w-[110rem] px-6 text-[0.65rem] uppercase tracking-[0.28em] text-ink/40 md:px-10 lg:mb-10 lg:px-14">
-          <span className="lg:hidden">Swipe to explore →</span>
-          <span className="hidden lg:inline">Scroll to explore →</span>
+          <span className="lg:hidden">{t("site.clinicExperience.swipeHint")}</span>
+          <span className="hidden lg:inline">{t("site.clinicExperience.scrollHint")}</span>
         </p>
       </div>
     </section>

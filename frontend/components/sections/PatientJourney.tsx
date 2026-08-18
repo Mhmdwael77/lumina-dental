@@ -5,8 +5,15 @@ import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { Check } from "lucide-react";
 import { JOURNEY_STEPS } from "@/lib/constants";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function PatientJourney() {
+  const { t } = useLanguage();
+  const localizedSteps = JOURNEY_STEPS.map((step, i) => ({
+    ...step,
+    title: t(`site.patientJourney.s${i + 1}Title`),
+    description: t(`site.patientJourney.s${i + 1}Desc`),
+  }));
   const sectionRef = useRef<HTMLElement>(null);
   const listRef = useRef<HTMLOListElement>(null);
   // number of steps reached (past the activation line)
@@ -67,12 +74,12 @@ export function PatientJourney() {
         <div className="lg:sticky lg:top-32 lg:self-start">
           <p className="pj-head mb-8 flex items-center gap-3 text-[0.7rem] font-medium uppercase tracking-[0.32em] text-ink/50">
             <span className="h-px w-8 bg-gold" aria-hidden="true" />
-            The Journey
+            {t("site.patientJourney.eyebrow")}
           </p>
           <h2 className="pj-head font-serif text-[2.5rem] font-medium leading-[1.02] tracking-[-0.02em] text-ink sm:text-5xl lg:text-6xl">
-            Your journey
+            {t("site.patientJourney.headingLine1")}
             <br />
-            to a <em className="italic text-ink/90">better smile.</em>
+            {t("site.patientJourney.headingPrefix")} <em className="italic text-ink/90">{t("site.patientJourney.headingSuffix")}</em>
           </h2>
         </div>
 
@@ -85,7 +92,7 @@ export function PatientJourney() {
             aria-hidden="true"
           />
 
-          {JOURNEY_STEPS.map((step, i) => {
+          {localizedSteps.map((step, i) => {
             const active = i < reached;
             return (
               <li

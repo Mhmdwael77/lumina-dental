@@ -6,6 +6,7 @@ import Link from "next/link";
 import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { ArrowDown, ArrowUpRight, Star } from "lucide-react";
 import { HERO_PIN_END } from "@/lib/animations";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 // The 3D scene is browser-only (WebGL) — load it client-side.
 const ToothScene = dynamic(
@@ -17,6 +18,7 @@ const useIsoLayoutEffect =
   typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 export function Hero() {
+  const { t } = useLanguage();
   const sectionRef = useRef<HTMLElement>(null);
   const eyebrowRef = useRef<HTMLParagraphElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -123,8 +125,8 @@ export function Hero() {
             ref={eyebrowRef}
             className="mb-5 text-[0.7rem] font-medium uppercase tracking-[0.32em] text-ink/55 sm:mb-7"
           >
-            Modern Dentistry <span className="text-gold">•</span> Personalized
-            Care
+            {t("site.hero.eyebrow")} <span className="text-gold">{t("site.hero.eyebrowSeparator")}</span>{" "}
+            {t("site.hero.eyebrowSuffix")}
           </p>
 
           {/* Heading */}
@@ -132,11 +134,11 @@ export function Hero() {
             ref={headingRef}
             className="text-[2.85rem] leading-[0.98] tracking-[-0.02em] text-ink sm:text-6xl lg:text-7xl xl:text-[5.25rem]"
           >
-            A healthier
+            {t("site.hero.headingLine1")}
             <br />
-            <span className="italic text-ink/90">smile</span>
+            <span className="italic text-ink/90">{t("site.hero.headingLine2")}</span>
             <br />
-            starts here.
+            {t("site.hero.headingLine3")}
           </h1>
 
           {/* Supporting text */}
@@ -144,8 +146,7 @@ export function Hero() {
             ref={descRef}
             className="mt-6 max-w-md text-base leading-relaxed text-ink/65 sm:mt-8 sm:text-lg"
           >
-            Exceptional dental care in a calm, modern environment — designed
-            around your comfort and confidence.
+            {t("site.hero.description")}
           </p>
 
           {/* Buttons */}
@@ -157,7 +158,7 @@ export function Hero() {
               href="/booking"
               className="group inline-flex items-center justify-center gap-2 rounded-full bg-ink px-8 py-4 text-xs font-medium uppercase tracking-[0.2em] text-cream transition-all duration-300 hover:bg-ink/85 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold"
             >
-              Book an Appointment
+              {t("site.hero.bookAppointment")}
               <ArrowUpRight
                 className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
                 strokeWidth={1.5}
@@ -168,7 +169,7 @@ export function Hero() {
               href="#treatments"
               className="inline-flex items-center justify-center gap-2 rounded-full border border-ink/15 px-8 py-4 text-xs font-medium uppercase tracking-[0.2em] text-ink transition-colors duration-300 hover:border-ink/40 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold"
             >
-              Explore Treatments
+              {t("site.hero.exploreTreatments")}
             </a>
           </div>
         </div>
@@ -186,13 +187,13 @@ export function Hero() {
             className="pointer-events-none absolute bottom-4 left-2 flex items-center gap-4 rounded-2xl border border-ink/5 bg-white/70 px-5 py-4 shadow-[0_10px_40px_-15px_rgba(16,24,32,0.25)] backdrop-blur-sm sm:bottom-8 sm:left-4 lg:bottom-10"
           >
             <div className="text-2xl font-medium leading-none text-ink">
-              4.9<span className="text-base text-ink/40"> / 5</span>
+              4.9<span className="text-base text-ink/40"> {t("site.hero.ratingOutOf")}</span>
             </div>
             <div className="h-8 w-px bg-ink/10" aria-hidden="true" />
             <figcaption>
               <div
                 className="flex gap-0.5 text-gold"
-                aria-label="Rated 4.9 out of 5"
+                aria-label={t("site.hero.ratingAria")}
               >
                 {Array.from({ length: 5 }).map((_, i) => (
                   <Star
@@ -204,7 +205,7 @@ export function Hero() {
                 ))}
               </div>
               <p className="mt-1.5 text-[0.72rem] tracking-wide text-ink/55">
-                Trusted by 2,000+ patients
+                {t("site.hero.trustedBy")}
               </p>
             </figcaption>
           </figure>
@@ -219,7 +220,7 @@ export function Hero() {
         aria-label="Scroll to explore"
       >
         <span className="text-[0.65rem] font-light uppercase tracking-[0.35em] text-ink/50">
-          Scroll to Explore
+          {t("site.hero.scrollToExplore")}
         </span>
         <span ref={arrowRef} className="text-ink/50">
           <ArrowDown className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />

@@ -50,9 +50,10 @@ import {
   updateExtraCharge,
   deleteBooking,
   submitBooking,
-  checkBackendHealth,
 } from "@/lib/api";
 import { TREATMENT_OPTIONS, SERVICE_OPTIONS, CONSULTATION_SERVICE } from "@/lib/constants";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
+import { LanguageToggle } from "@/components/ui/LanguageToggle";
 
 /** A booking is a consultation when the backend tagged its service type. */
 const isConsultation = (b: Booking) => b.service_type === "consultation";
@@ -160,6 +161,7 @@ function formatCreatedAt(iso?: string): string {
 }
 
 export default function AdminPage() {
+  const { t, locale } = useLanguage();
   const [token, setTokenState] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
 
@@ -224,22 +226,22 @@ export default function AdminPage() {
     const todayIso = toLocalIso();
     const result = [];
 
+    const dateLocale = locale === "ar" ? "ar-EG-u-nu-latn" : "en-US"; // -u-nu-latn: keep Western digits
     for (let day = 1; day <= totalDays; day++) {
       const dateObj = new Date(year, month, day);
       result.push({
         iso: toLocalIso(dateObj),
         day,
-        dayName: dateObj.toLocaleDateString("en-US", { weekday: "short" }),
+        dayName: dateObj.toLocaleDateString(dateLocale, { weekday: "short" }),
         isToday: toLocalIso(dateObj) === todayIso,
       });
     }
     return result;
-  }, [selectedMonth, selectedYear]);
+  }, [selectedMonth, selectedYear, locale]);
 
   // Dashboard data state
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [isOnline, setIsOnline] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
@@ -306,15 +308,13 @@ export default function AdminPage() {
     setIsLoading(true);
     try {
       const activeToken = token || "";
-      const online = await checkBackendHealth();
-      setIsOnline(online);
       const data = await fetchBookings(activeToken);
       setBookings(data);
     } catch (err) {
       if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
         removeToken();
         setTokenState(null);
-        setAuthError("Your session has expired — please sign in again. Your data is safe.");
+        setAuthError(t("admin.login.sessionExpired"));
       }
     } finally {
       setIsLoading(false);
@@ -425,7 +425,7 @@ export default function AdminPage() {
   const handleCreateNewBooking = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newForm.full_name.trim() || !newForm.phone.trim() || !newForm.date) {
-      setNewFormError("Please fill out Patient Name, Phone, and Preferred Date.");
+      setNewFormError(t("admin.newBooking.formError"));
       return;
     }
 
@@ -458,7 +458,7 @@ export default function AdminPage() {
         message: "",
       });
     } catch (err) {
-      setNewFormError(err instanceof ApiError ? err.message : "Failed to create appointment.");
+      setNewFormError(err instanceof ApiError ? err.message : t("admin.newBooking.createError"));
     } finally {
       setIsSubmittingNew(false);
     }
@@ -519,7 +519,7 @@ export default function AdminPage() {
   const handleSaveExtraCharge = async (bookingId: number) => {
     const amount = parseFloat(extraChargeDraft.amount);
     if (isNaN(amount) || amount < 0) {
-      setExtraChargeError("Enter a valid amount (0 or more).");
+      setExtraChargeError(t("admin.extraCharge.amountError"));
       return;
     }
     setExtraChargeSavingId(bookingId);
@@ -533,7 +533,7 @@ export default function AdminPage() {
       applyBookingUpdate(updated);
       setEditingExtraChargeId(null);
     } catch (err) {
-      setExtraChargeError(err instanceof ApiError ? err.message : "Could not save the extra charge.");
+      setExtraChargeError(err instanceof ApiError ? err.message : t("admin.extraCharge.saveError"));
     } finally {
       setExtraChargeSavingId(null);
     }
@@ -551,7 +551,7 @@ export default function AdminPage() {
       applyBookingUpdate(updated);
       setEditingExtraChargeId(null);
     } catch (err) {
-      setExtraChargeError(err instanceof ApiError ? err.message : "Could not remove the extra charge.");
+      setExtraChargeError(err instanceof ApiError ? err.message : t("admin.extraCharge.removeError"));
     } finally {
       setExtraChargeSavingId(null);
     }
@@ -571,7 +571,7 @@ export default function AdminPage() {
         }`}
       >
         <Receipt className="w-3.5 h-3.5" />
-        +{b.extra_charge_amount.toLocaleString()} EGP {b.extra_charge_paid ? "· Paid" : "· Unpaid"}
+        +{b.extra_charge_amount.toLocaleString()} EGP · {b.extra_charge_paid ? t("admin.extraCharge.badgePaid") : t("admin.extraCharge.badgeUnpaid")}
       </span>
     );
   };
@@ -587,9 +587,9 @@ export default function AdminPage() {
           <span className="flex items-center justify-center h-6 w-6 rounded-lg bg-[#b99a6b]/20 text-[#b99a6b]">
             <Receipt className="w-3.5 h-3.5" />
           </span>
-          Extra Charge
+          {t("admin.extraCharge.panelTitle")}
           <span className="font-normal normal-case tracking-normal text-[#101820]/50">
-            — e.g. crown, filling, add-on work
+            {t("admin.extraCharge.panelSubtitle")}
           </span>
         </div>
         {extraChargeError && (
@@ -599,7 +599,9 @@ export default function AdminPage() {
         )}
         <div className="grid grid-cols-1 sm:grid-cols-[7rem_1fr_9rem] gap-3">
           <div>
-            <label className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50 mb-1">Amount</label>
+            <label className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50 mb-1">
+              {t("admin.extraCharge.amountLabel")}
+            </label>
             <div className="relative">
               <input
                 type="number"
@@ -608,28 +610,28 @@ export default function AdminPage() {
                 value={extraChargeDraft.amount}
                 onChange={(e) => setExtraChargeDraft((d) => ({ ...d, amount: e.target.value }))}
                 placeholder="0"
-                className="w-full bg-white border border-[#101820]/15 rounded-xl pl-3 pr-11 py-2 text-sm font-medium text-[#101820] outline-none focus:border-[#b99a6b]"
+                className="w-full bg-white border border-[#101820]/15 rounded-xl pl-3 pr-11 rtl:pl-11 rtl:pr-3 py-2 text-sm font-medium text-[#101820] outline-none focus:border-[#b99a6b]"
               />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[0.65rem] font-medium text-[#101820]/40">
+              <span className="absolute right-3 rtl:right-auto rtl:left-3 top-1/2 -translate-y-1/2 text-[0.65rem] font-medium text-[#101820]/40">
                 EGP
               </span>
             </div>
           </div>
           <div>
             <label className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50 mb-1">
-              What for?
+              {t("admin.extraCharge.whatForLabel")}
             </label>
             <input
               type="text"
               value={extraChargeDraft.description}
               onChange={(e) => setExtraChargeDraft((d) => ({ ...d, description: e.target.value }))}
-              placeholder="e.g. Crown fitting"
+              placeholder={t("admin.extraCharge.whatForPlaceholder")}
               className="w-full bg-white border border-[#101820]/15 rounded-xl px-3 py-2 text-xs text-[#101820] outline-none focus:border-[#b99a6b]"
             />
           </div>
           <div>
             <label className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50 mb-1">
-              Status
+              {t("admin.extraCharge.statusLabel")}
             </label>
             <label className="flex items-center gap-2 h-[calc(100%-0px)] px-3 py-2 rounded-xl bg-white border border-[#101820]/15 text-xs text-[#101820] cursor-pointer">
               <input
@@ -638,7 +640,7 @@ export default function AdminPage() {
                 onChange={(e) => setExtraChargeDraft((d) => ({ ...d, paid: e.target.checked }))}
                 className="accent-[#b99a6b] w-3.5 h-3.5"
               />
-              Paid already
+              {t("admin.extraCharge.paidAlready")}
             </label>
           </div>
         </div>
@@ -648,7 +650,7 @@ export default function AdminPage() {
             disabled={saving}
             className="px-4 py-1.5 rounded-xl bg-[#101820] text-[#f4f1eb] text-xs font-medium hover:bg-[#101820]/85 transition-colors disabled:opacity-50"
           >
-            {saving ? "Saving…" : "Save Charge"}
+            {saving ? t("admin.extraCharge.saving") : t("admin.extraCharge.save")}
           </button>
           {typeof b.extra_charge_amount === "number" && b.extra_charge_amount > 0 && (
             <button
@@ -656,14 +658,14 @@ export default function AdminPage() {
               disabled={saving}
               className="px-4 py-1.5 rounded-xl bg-red-500/10 text-red-700 text-xs font-medium hover:bg-red-500/20 transition-colors disabled:opacity-50"
             >
-              Remove
+              {t("admin.extraCharge.remove")}
             </button>
           )}
           <button
             onClick={cancelEditExtraCharge}
             className="px-3.5 py-1.5 rounded-xl bg-white border border-[#101820]/15 text-[#101820]/70 text-xs font-medium hover:bg-[#101820]/5 transition-colors"
           >
-            Cancel
+            {t("admin.extraCharge.cancel")}
           </button>
         </div>
       </div>
@@ -682,6 +684,7 @@ export default function AdminPage() {
     const tomorrowDate = new Date();
     tomorrowDate.setDate(tomorrowDate.getDate() + 1);
     const tomorrowIso = toLocalIso(tomorrowDate);
+    const dateLocale = locale === "ar" ? "ar-EG-u-nu-latn" : "en-US"; // -u-nu-latn: keep Western digits
     const result = [];
 
     for (let i = -3; i < 7; i++) {
@@ -690,18 +693,21 @@ export default function AdminPage() {
       const iso = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, "0")}-${String(dateObj.getDate()).padStart(2, "0")}`;
 
       const label =
-        iso === todayIso ? "Today" : iso === tomorrowIso ? "Tomorrow" : dateObj.toLocaleDateString("en-US", { weekday: "short" });
+        iso === todayIso
+          ? t("admin.agenda.today")
+          : iso === tomorrowIso
+          ? t("admin.agenda.tomorrow")
+          : dateObj.toLocaleDateString(dateLocale, { weekday: "short" });
 
       result.push({
         iso,
-        dateLabel: dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        dateLabel: dateObj.toLocaleDateString(dateLocale, { month: "short", day: "numeric" }),
         dayLabel: label,
-        dayNameAr: dateObj.toLocaleDateString("ar-EG", { weekday: "short" }),
         isToday: iso === todayIso,
       });
     }
     return result;
-  }, [weekAnchor]);
+  }, [weekAnchor, locale, t]);
 
   // "Aug 16 – Aug 22, 2026" label for the week header.
   const weekRangeLabel = useMemo(() => {
@@ -882,22 +888,25 @@ export default function AdminPage() {
     [bookings, consultationForCompletedId]
   );
 
+  // Full date heading, formatted in whichever language is active — "en"
+  // holds the display string regardless of locale (kept as one field so
+  // every existing usage below doesn't need to branch on locale itself).
   const selectedDateFormatted = useMemo(() => {
     try {
       const [year, month, day] = selectedDate.split("-").map(Number);
       const d = new Date(year, month - 1, day);
-      const en = d.toLocaleDateString("en-US", {
+      const dateLocale = locale === "ar" ? "ar-EG-u-nu-latn" : "en-US";
+      const en = d.toLocaleDateString(dateLocale, {
         weekday: "long",
         month: "long",
         day: "numeric",
         year: "numeric",
       });
-      const ar = d.toLocaleDateString("ar-EG", { weekday: "long" });
-      return { en, ar };
+      return { en };
     } catch {
-      return { en: selectedDate, ar: "" };
+      return { en: selectedDate };
     }
-  }, [selectedDate]);
+  }, [selectedDate, locale]);
 
   // What the Analytics Cards summarize: the Day Agenda always scopes to the
   // selected day; the All Bookings table stays at "all time" until staff
@@ -905,28 +914,32 @@ export default function AdminPage() {
   // match what the table is actually showing instead of staying global.
   const statsScope = useMemo(() => {
     if (viewMode === "agenda") {
-      return { bookings: agendaBookings, caption: `Records for ${selectedDateFormatted.en}` };
+      return { bookings: agendaBookings, caption: t("admin.stats.recordsFor", { scope: selectedDateFormatted.en }) };
     }
     if (viewMode === "table") {
       if (selectedTableDay) {
-        return { bookings: filteredBookings, caption: `Records for ${selectedTableDay}` };
+        return { bookings: filteredBookings, caption: t("admin.stats.recordsFor", { scope: selectedTableDay }) };
       }
       if (selectedMonth !== "all" && selectedYear !== "all") {
         const monthLabel = MONTH_NAMES.find((m) => m.value === selectedMonth)?.label.split(" (")[0] ?? selectedMonth;
-        return { bookings: filteredBookings, caption: `Records for ${monthLabel} ${selectedYear}` };
+        return { bookings: filteredBookings, caption: t("admin.stats.recordsFor", { scope: `${monthLabel} ${selectedYear}` }) };
       }
       if (datePreset !== "all") {
-        const presetCaptions: Record<string, string> = {
-          today: "Records for today",
-          this_month: "Records for this month",
-          last_month: "Records for last month",
-          this_year: "Records for this year",
+        const presetScopes: Record<string, string> = {
+          today: t("admin.stats.today"),
+          this_month: t("admin.stats.thisMonth"),
+          last_month: t("admin.stats.lastMonth"),
+          this_year: t("admin.stats.thisYear"),
         };
-        return { bookings: filteredBookings, caption: presetCaptions[datePreset] ?? "Filtered records" };
+        const scope = presetScopes[datePreset];
+        return {
+          bookings: filteredBookings,
+          caption: scope ? t("admin.stats.recordsFor", { scope }) : t("admin.stats.filtered"),
+        };
       }
     }
-    return { bookings, caption: "All time records" };
-  }, [viewMode, agendaBookings, filteredBookings, bookings, selectedDateFormatted, selectedTableDay, selectedMonth, selectedYear, datePreset]);
+    return { bookings, caption: t("admin.stats.allTime") };
+  }, [viewMode, agendaBookings, filteredBookings, bookings, selectedDateFormatted, selectedTableDay, selectedMonth, selectedYear, datePreset, t]);
 
   // Statistics calculation — scoped to `statsScope`, not always every booking.
   const stats = useMemo(() => {
@@ -945,16 +958,18 @@ export default function AdminPage() {
     return (
       <main className="min-h-screen w-full bg-[#f4f1eb] text-[#101820] flex items-center justify-center p-6 selection:bg-[#b99a6b] selection:text-white">
         <div className="relative w-full max-w-md bg-white border border-[#101820]/10 rounded-3xl p-8 shadow-2xl">
+          <LanguageToggle className="absolute top-4 right-4 rtl:right-auto rtl:left-4 bg-[#f4f1eb] text-[#101820]/70 hover:text-[#101820]" />
+
           {/* Header Monogram */}
           <div className="flex flex-col items-center text-center mb-8">
             <div className="h-16 w-16 rounded-2xl bg-[#101820] text-[#b99a6b] flex items-center justify-center font-serif text-2xl font-bold shadow-md mb-4">
               LD
             </div>
             <h1 className="font-serif text-2xl font-medium tracking-tight text-[#101820]">
-              Lumina Dental Portal
+              {t("admin.login.portalTitle")}
             </h1>
             <p className="text-xs uppercase tracking-[0.2em] text-[#b99a6b] mt-1">
-              Clinic Management & Day Schedule
+              {t("admin.login.portalSubtitle")}
             </p>
           </div>
 
@@ -968,16 +983,16 @@ export default function AdminPage() {
 
             <div>
               <label className="block text-[0.68rem] font-medium uppercase tracking-[0.18em] text-[#101820]/60 mb-2">
-                Username
+                {t("admin.login.username")}
               </label>
               <div className="relative">
-                <User className="absolute left-3.5 top-3 w-4 h-4 text-[#101820]/40" />
+                <User className="absolute left-3.5 rtl:left-auto rtl:right-3.5 top-3 w-4 h-4 text-[#101820]/40" />
                 <input
                   type="text"
                   required
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="w-full bg-[#f4f1eb]/60 border border-[#101820]/15 rounded-xl pl-10 pr-4 py-2.5 text-sm text-[#101820] placeholder-[#101820]/30 outline-none focus:border-[#b99a6b] focus:ring-2 focus:ring-[#b99a6b]/20 transition-all"
+                  className="w-full bg-[#f4f1eb]/60 border border-[#101820]/15 rounded-xl pl-10 pr-4 rtl:pl-4 rtl:pr-10 py-2.5 text-sm text-[#101820] placeholder-[#101820]/30 outline-none focus:border-[#b99a6b] focus:ring-2 focus:ring-[#b99a6b]/20 transition-all"
                   placeholder="admin"
                 />
               </div>
@@ -985,16 +1000,16 @@ export default function AdminPage() {
 
             <div>
               <label className="block text-[0.68rem] font-medium uppercase tracking-[0.18em] text-[#101820]/60 mb-2">
-                Password
+                {t("admin.login.password")}
               </label>
               <div className="relative">
-                <ShieldCheck className="absolute left-3.5 top-3 w-4 h-4 text-[#101820]/40" />
+                <ShieldCheck className="absolute left-3.5 rtl:left-auto rtl:right-3.5 top-3 w-4 h-4 text-[#101820]/40" />
                 <input
                   type="password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-[#f4f1eb]/60 border border-[#101820]/15 rounded-xl pl-10 pr-4 py-2.5 text-sm text-[#101820] placeholder-[#101820]/30 outline-none focus:border-[#b99a6b] focus:ring-2 focus:ring-[#b99a6b]/20 transition-all"
+                  className="w-full bg-[#f4f1eb]/60 border border-[#101820]/15 rounded-xl pl-10 pr-4 rtl:pl-4 rtl:pr-10 py-2.5 text-sm text-[#101820] placeholder-[#101820]/30 outline-none focus:border-[#b99a6b] focus:ring-2 focus:ring-[#b99a6b]/20 transition-all"
                   placeholder="••••••••"
                 />
               </div>
@@ -1005,12 +1020,12 @@ export default function AdminPage() {
               disabled={isLoggingIn}
               className="w-full mt-2 py-3.5 rounded-xl bg-[#101820] text-[#f4f1eb] font-medium text-xs uppercase tracking-[0.2em] shadow-lg hover:bg-[#101820]/90 active:scale-[0.99] transition-all disabled:opacity-50"
             >
-              {isLoggingIn ? "Authenticating..." : "Sign In to Admin Portal"}
+              {isLoggingIn ? t("admin.login.signingIn") : t("admin.login.signIn")}
             </button>
 
             {/* Quick Helper Credentials Hint */}
             <div className="pt-4 border-t border-[#101820]/10 text-center text-xs text-[#101820]/50 space-y-1">
-              <p>Default Credentials:</p>
+              <p>{t("admin.login.defaultCredentials")}</p>
               <div className="flex items-center justify-center gap-3 font-mono text-[0.75rem] text-[#b99a6b]">
                 <span>admin / admin123</span>
                 <span>•</span>
@@ -1035,10 +1050,10 @@ export default function AdminPage() {
             </div>
             <div>
               <h1 className="font-serif text-lg font-medium leading-tight text-[#101820]">
-                Lumina Dental Clinic
+                {t("admin.header.clinicName")}
               </h1>
               <p className="text-[0.65rem] uppercase tracking-[0.2em] text-[#b99a6b]">
-                Clinic Administration & Schedule
+                {t("admin.header.clinicSubtitle")}
               </p>
             </div>
           </div>
@@ -1055,7 +1070,7 @@ export default function AdminPage() {
                 }`}
               >
                 <CalendarDays className="w-3.5 h-3.5" />
-                <span>Day Agenda</span>
+                <span>{t("admin.header.dayAgenda")}</span>
               </button>
               <button
                 onClick={() => setViewMode("table")}
@@ -1066,7 +1081,7 @@ export default function AdminPage() {
                 }`}
               >
                 <ListFilter className="w-3.5 h-3.5" />
-                <span>All Bookings</span>
+                <span>{t("admin.header.allBookings")}</span>
               </button>
               <button
                 onClick={() => setViewMode("consultations")}
@@ -1077,10 +1092,10 @@ export default function AdminPage() {
                 }`}
               >
                 <Stethoscope className="w-3.5 h-3.5" />
-                <span>Consultations</span>
+                <span>{t("admin.header.consultations")}</span>
                 {consultationBookings.length + completedExamsWithConsultation.length > 0 && (
                   <span
-                    className={`ml-0.5 rounded-full px-1.5 py-0.5 text-[0.6rem] font-semibold leading-none ${
+                    className={`ml-0.5 rtl:ml-0 rtl:mr-0.5 rounded-full px-1.5 py-0.5 text-[0.6rem] font-semibold leading-none ${
                       viewMode === "consultations"
                         ? "bg-[#b99a6b] text-[#101820]"
                         : "bg-[#101820]/10 text-[#101820]"
@@ -1092,21 +1107,7 @@ export default function AdminPage() {
               </button>
             </div>
 
-            {/* Backend connection status pill */}
-            <span
-              className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[0.68rem] font-medium border ${
-                isOnline
-                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700"
-                  : "bg-amber-500/10 border-amber-500/30 text-amber-700"
-              }`}
-            >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  isOnline ? "bg-emerald-500 animate-pulse" : "bg-amber-500"
-                }`}
-              />
-              {isOnline ? "FastAPI Online" : "Demo Mode"}
-            </span>
+            <LanguageToggle className="bg-white border border-[#101820]/10 shadow-sm text-[#101820]/70 hover:text-[#101820]" />
 
             <button
               onClick={() => {
@@ -1116,28 +1117,28 @@ export default function AdminPage() {
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#101820] text-[#f4f1eb] text-xs font-medium uppercase tracking-[0.15em] hover:bg-[#101820]/85 transition-colors shadow-sm"
             >
               <Plus className="w-4 h-4 text-[#b99a6b]" />
-              <span>+ New Appointment</span>
+              <span>{t("admin.header.newAppointment")}</span>
             </button>
 
             <div className="relative flex items-center">
               <button
                 onClick={handleManualRefresh}
                 disabled={isLoading || isRefreshing}
-                title="Refresh bookings from server"
+                title={t("admin.header.refreshTitle")}
                 className="p-2 rounded-xl bg-white border border-[#101820]/10 hover:bg-[#101820]/5 text-[#101820]/70 transition-colors shadow-sm"
               >
                 <RefreshCw className={`w-4 h-4 ${isLoading || isRefreshing ? "animate-spin text-[#b99a6b]" : ""}`} />
               </button>
               {refreshToast && (
                 <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap text-[0.68rem] font-medium text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-md shadow-md animate-in fade-in z-40">
-                  ✓ Refreshed!
+                  ✓ {t("admin.header.refreshed")}
                 </span>
               )}
             </div>
 
             <button
               onClick={handleLogout}
-              title="Log out"
+              title={t("admin.header.logout")}
               className="p-2 rounded-xl bg-white border border-[#101820]/10 hover:bg-red-500/10 hover:border-red-500/20 text-[#101820]/70 hover:text-red-600 transition-colors shadow-sm"
             >
               <LogOut className="w-4 h-4" />
@@ -1155,7 +1156,7 @@ export default function AdminPage() {
             <button
               onClick={() => setArrivalError("")}
               className="text-red-700/60 hover:text-red-700"
-              title="Dismiss"
+              title={t("admin.header.dismiss")}
             >
               <X className="w-4 h-4" />
             </button>
@@ -1167,7 +1168,7 @@ export default function AdminPage() {
           <div className="bg-white border border-[#101820]/10 rounded-2xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[0.68rem] font-medium uppercase tracking-[0.2em] text-[#101820]/50">
-                Total Bookings
+                {t("admin.stats.totalBookings")}
               </span>
               <Building2 className="w-5 h-5 text-[#b99a6b]" />
             </div>
@@ -1180,40 +1181,40 @@ export default function AdminPage() {
           <div className="bg-white border border-amber-500/30 rounded-2xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[0.68rem] font-medium uppercase tracking-[0.2em] text-amber-700">
-                Pending Approval
+                {t("admin.stats.pendingApproval")}
               </span>
               <Clock3 className="w-5 h-5 text-amber-600" />
             </div>
             <div className="font-serif text-3xl font-medium text-amber-700">
               {stats.pending}
             </div>
-            <p className="text-[0.7rem] text-amber-600/70 mt-1">Requires confirmation</p>
+            <p className="text-[0.7rem] text-amber-600/70 mt-1">{t("admin.stats.pendingCaption")}</p>
           </div>
 
           <div className="bg-white border border-emerald-500/30 rounded-2xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[0.68rem] font-medium uppercase tracking-[0.2em] text-emerald-700">
-                Confirmed Slots
+                {t("admin.stats.confirmedSlots")}
               </span>
               <CheckCircle2 className="w-5 h-5 text-emerald-600" />
             </div>
             <div className="font-serif text-3xl font-medium text-emerald-700">
               {stats.confirmed}
             </div>
-            <p className="text-[0.7rem] text-emerald-600/70 mt-1">Ready for visit</p>
+            <p className="text-[0.7rem] text-emerald-600/70 mt-1">{t("admin.stats.confirmedCaption")}</p>
           </div>
 
           <div className="bg-white border border-blue-500/30 rounded-2xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[0.68rem] font-medium uppercase tracking-[0.2em] text-blue-700">
-                Completed
+                {t("admin.stats.completed")}
               </span>
               <Sparkles className="w-5 h-5 text-blue-600" />
             </div>
             <div className="font-serif text-3xl font-medium text-blue-700">
               {stats.completed}
             </div>
-            <p className="text-[0.7rem] text-blue-600/70 mt-1">Finished treatments</p>
+            <p className="text-[0.7rem] text-blue-600/70 mt-1">{t("admin.stats.completedCaption")}</p>
           </div>
         </div>
 
@@ -1229,18 +1230,13 @@ export default function AdminPage() {
                     <h2 className="font-serif text-2xl font-medium text-[#101820]">
                       {selectedDateFormatted.en}
                     </h2>
-                    {selectedDateFormatted.ar && (
-                      <span className="text-[#b99a6b] font-medium text-base">
-                        ({selectedDateFormatted.ar})
-                      </span>
-                    )}
                   </div>
                   <p className="text-xs text-[#101820]/50 mt-1">
-                    Showing all patient appointments scheduled for this day (
+                    {t("admin.agenda.showingAppointments")}
                     <strong className="text-[#101820]">
                       {agendaBookings.length}
                     </strong>{" "}
-                    patients)
+                    {t("admin.agenda.patients")}
                   </p>
                 </div>
 
@@ -1248,18 +1244,18 @@ export default function AdminPage() {
                 <div className="flex flex-wrap items-center gap-3">
                   {/* Search Input for Agenda */}
                   <div className="relative w-full sm:w-64">
-                    <Search className="absolute left-3.5 top-2.5 w-4 h-4 text-[#101820]/40" />
+                    <Search className="absolute left-3.5 rtl:left-auto rtl:right-3.5 top-2.5 w-4 h-4 text-[#101820]/40" />
                     <input
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search patient, phone (01x)..."
-                      className="w-full bg-[#f4f1eb] border border-[#101820]/15 rounded-xl pl-10 pr-8 py-1.5 text-xs text-[#101820] placeholder-[#101820]/40 outline-none focus:border-[#b99a6b]"
+                      placeholder={t("admin.agenda.searchPlaceholder")}
+                      className="w-full bg-[#f4f1eb] border border-[#101820]/15 rounded-xl pl-10 pr-8 rtl:pl-8 rtl:pr-10 py-1.5 text-xs text-[#101820] placeholder-[#101820]/40 outline-none focus:border-[#b99a6b]"
                     />
                     {searchQuery && (
                       <button
                         onClick={() => setSearchQuery("")}
-                        className="absolute right-2.5 top-2 text-[#101820]/40 hover:text-[#101820]"
+                        className="absolute right-2.5 rtl:right-auto rtl:left-2.5 top-2 text-[#101820]/40 hover:text-[#101820]"
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>
@@ -1273,25 +1269,25 @@ export default function AdminPage() {
               <div className="space-y-2 pt-2 border-t border-[#101820]/10">
                 <div className="flex items-center justify-between text-xs font-medium text-[#101820]/60">
                   <span className="uppercase tracking-wider text-[0.68rem] text-[#b99a6b] font-semibold">
-                    🗓️ This Week — {weekRangeLabel}
+                    🗓️ {t("admin.agenda.thisWeek")} — {weekRangeLabel}
                   </span>
                   <div className="flex items-center p-1 rounded-xl bg-white border border-[#101820]/10 shadow-sm">
                     <button
                       type="button"
                       onClick={() => shiftWeek("prev")}
                       className="p-1 rounded-lg text-[#101820]/60 hover:bg-[#101820] hover:text-white transition-colors"
-                      title="Previous week"
+                      title={t("admin.agenda.prevWeek")}
                     >
-                      <ChevronLeft className="w-3.5 h-3.5" />
+                      <ChevronLeft className="w-3.5 h-3.5 rtl:rotate-180" />
                     </button>
                     <div className="w-px h-3.5 bg-[#101820]/10 mx-0.5" />
                     <button
                       type="button"
                       onClick={() => shiftWeek("next")}
                       className="p-1 rounded-lg text-[#101820]/60 hover:bg-[#101820] hover:text-white transition-colors"
-                      title="Next week"
+                      title={t("admin.agenda.nextWeek")}
                     >
-                      <ChevronRight className="w-3.5 h-3.5" />
+                      <ChevronRight className="w-3.5 h-3.5 rtl:rotate-180" />
                     </button>
                   </div>
                 </div>
@@ -1324,7 +1320,9 @@ export default function AdminPage() {
                         >
                           {pill.dayLabel}
                         </span>
-                        <span className="font-serif text-lg font-bold">{pill.dateLabel}</span>
+                        <span className={`font-serif font-bold whitespace-nowrap ${locale === "ar" ? "text-sm" : "text-lg"}`}>
+                          {pill.dateLabel}
+                        </span>
                         {countForDay > 0 && (
                           <span
                             className={`text-xs px-2.5 py-1 rounded-full font-medium ${
@@ -1333,7 +1331,7 @@ export default function AdminPage() {
                                 : "bg-[#101820]/10 text-[#101820]/70"
                             }`}
                           >
-                            {countForDay} patient{countForDay === 1 ? "" : "s"}
+                            {t("admin.agenda.patientCount", { count: countForDay, plural: countForDay === 1 ? "" : "s" })}
                           </span>
                         )}
                       </button>
@@ -1351,11 +1349,10 @@ export default function AdminPage() {
                     <CalendarIcon className="w-7 h-7" />
                   </div>
                   <h3 className="font-serif text-xl font-medium text-[#101820]">
-                    No appointments scheduled for this day
+                    {t("admin.agenda.emptyTitle")}
                   </h3>
                   <p className="text-xs text-[#101820]/60 leading-relaxed">
-                    There are no patient bookings on {selectedDateFormatted.en}. You can
-                    add a walk-in or phone appointment manually using the button below.
+                    {t("admin.agenda.emptyBody", { date: selectedDateFormatted.en })}
                   </p>
                   <button
                     onClick={() => {
@@ -1365,7 +1362,7 @@ export default function AdminPage() {
                     className="mt-2 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#101820] text-[#f4f1eb] text-xs font-medium uppercase tracking-[0.15em] hover:bg-[#101820]/85 transition-colors shadow"
                   >
                     <Plus className="w-4 h-4 text-[#b99a6b]" />
-                    <span>Book Patient for {selectedDate}</span>
+                    <span>{t("admin.agenda.bookPatientFor", { date: selectedDate })}</span>
                   </button>
                 </div>
               </div>
@@ -1383,7 +1380,7 @@ export default function AdminPage() {
                         {/* Queue Number Badge */}
                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#101820] text-[#f4f1eb] font-serif text-sm font-medium">
                           <ListFilter className="w-3.5 h-3.5 text-[#b99a6b]" />
-                          Queue #{b.queue_number ?? "—"}
+                          {t("admin.agenda.queue", { number: b.queue_number ?? "—" })}
                         </span>
 
                         {/* Status Badge */}
@@ -1410,7 +1407,7 @@ export default function AdminPage() {
                           }`}
                         >
                           {b.patient_arrived ? <UserCheck className="w-3.5 h-3.5" /> : <UserX className="w-3.5 h-3.5" />}
-                          {b.patient_arrived ? "Entered" : "Not Entered"}
+                          {b.patient_arrived ? t("admin.common.entered") : t("admin.common.notEntered")}
                         </span>
 
                         {/* Payment Badge */}
@@ -1428,9 +1425,9 @@ export default function AdminPage() {
                           )}
                           {b.payment_method === "online"
                             ? b.payment_status === "paid"
-                              ? "Paid Online"
-                              : "Online — Pending"
-                            : "Pay at Clinic"}
+                              ? t("admin.common.paidOnline")
+                              : t("admin.common.onlinePending")
+                            : t("admin.common.payAtClinic")}
                         </span>
 
                         {/* Extra Charge Badge — add-on work billed on top of the base appointment */}
@@ -1440,7 +1437,7 @@ export default function AdminPage() {
                         {isConsultation(b) && (
                           <span className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-[#b99a6b] text-[#101820] text-xs font-semibold">
                             <Stethoscope className="w-3.5 h-3.5" />
-                            Consultation
+                            {t("admin.common.consultationBadge")}
                           </span>
                         )}
 
@@ -1452,14 +1449,14 @@ export default function AdminPage() {
                         {/* Completed exam whose patient also has a consultation */}
                         {consultationForCompletedId.get(b.id) && (
                           <span
-                            title={`Consultation booked for ${consultationForCompletedId.get(b.id)?.date}`}
+                            title={t("admin.common.consultationBookedFor", { date: consultationForCompletedId.get(b.id)?.date ?? "" })}
                             className="inline-flex items-center gap-1 pl-3 pr-1.5 py-1 rounded-xl bg-[#b99a6b] text-[#101820] text-xs font-semibold"
                           >
                             <Stethoscope className="w-3.5 h-3.5" />
-                            Has consultation
+                            {t("admin.common.hasConsultation")}
                             <button
                               onClick={() => handleSetConsultationHint(b.id, true)}
-                              title="Dismiss this reminder"
+                              title={t("admin.common.dismissReminderTitle")}
                               className="ml-0.5 rounded-full p-0.5 text-[#101820]/70 hover:bg-[#101820]/15 hover:text-[#101820] transition-colors"
                             >
                               <X className="w-3.5 h-3.5" />
@@ -1501,7 +1498,7 @@ export default function AdminPage() {
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#f4f1eb] hover:bg-[#101820] hover:text-white border border-[#101820]/15 text-xs text-[#101820] transition-colors"
                         >
                           <PhoneCall className="w-3.5 h-3.5 text-[#b99a6b]" />
-                          <span>Call</span>
+                          <span>{t("admin.common.call")}</span>
                         </a>
 
                         <a
@@ -1511,13 +1508,13 @@ export default function AdminPage() {
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-xs text-emerald-800 transition-colors"
                         >
                           <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>WhatsApp</span>
+                          <span>{t("admin.common.whatsapp")}</span>
                         </a>
 
                         <button
                           onClick={() => setSelectedBooking(b)}
                           className="p-1.5 rounded-xl bg-[#f4f1eb] hover:bg-[#101820] hover:text-white border border-[#101820]/15 text-[#101820] transition-colors"
-                          title="View Full Info"
+                          title={t("admin.common.viewFullInfo")}
                         >
                           <Eye className="w-4 h-4" />
                         </button>
@@ -1531,7 +1528,7 @@ export default function AdminPage() {
                               ? "bg-[#101820] text-white border-[#101820]"
                               : "bg-[#f4f1eb] hover:bg-[#101820] hover:text-white border-[#101820]/15 text-[#101820]"
                           }`}
-                          title="Add / edit extra charge"
+                          title={t("admin.common.addEditCharge")}
                         >
                           <Receipt className="w-4 h-4" />
                         </button>
@@ -1539,7 +1536,7 @@ export default function AdminPage() {
                         <button
                           onClick={() => handleDelete(b.id)}
                           className="p-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-600 transition-colors"
-                          title="Delete Appointment"
+                          title={t("admin.common.deleteAppointment")}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -1548,7 +1545,7 @@ export default function AdminPage() {
                       {/* Status quick switcher buttons */}
                       <div className="flex items-center gap-1.5 mt-1">
                         <span className="text-[0.65rem] text-[#101820]/50 uppercase tracking-wider mr-1">
-                          Status:
+                          {t("admin.common.status")}
                         </span>
                         <button
                           onClick={() => handleStatusChange(b.id, "confirmed")}
@@ -1558,7 +1555,7 @@ export default function AdminPage() {
                               : "bg-[#f4f1eb] text-[#101820]/70 hover:bg-emerald-500/10 hover:text-emerald-700"
                           }`}
                         >
-                          Confirm
+                          {t("admin.common.confirm")}
                         </button>
                         <button
                           onClick={() => handleStatusChange(b.id, "completed")}
@@ -1568,7 +1565,7 @@ export default function AdminPage() {
                               : "bg-[#f4f1eb] text-[#101820]/70 hover:bg-blue-500/10 hover:text-blue-700"
                           }`}
                         >
-                          Complete
+                          {t("admin.common.complete")}
                         </button>
                         <button
                           onClick={() => handleStatusChange(b.id, "cancelled")}
@@ -1578,21 +1575,21 @@ export default function AdminPage() {
                               : "bg-[#f4f1eb] text-[#101820]/70 hover:bg-red-500/10 hover:text-red-700"
                           }`}
                         >
-                          Cancel
+                          {t("admin.common.cancel")}
                         </button>
                       </div>
 
                       {/* Arrival control — backend enforces booking date == today AND within working hours */}
                       <div className="flex items-center gap-1.5">
                         <span className="text-[0.65rem] text-[#101820]/50 uppercase tracking-wider mr-1">
-                          Arrival:
+                          {t("admin.common.arrival")}
                         </span>
                         <button
                           onClick={() => handleToggleArrival(b)}
                           disabled={arrivalUpdatingId === b.id || (!b.patient_arrived && !canMarkEntered(b))}
                           title={
                             !b.patient_arrived && !canMarkEntered(b)
-                              ? "Can only mark as entered on the booking date, during working hours"
+                              ? t("admin.common.arrivalDisabledTitle")
                               : undefined
                           }
                           className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all disabled:cursor-not-allowed disabled:opacity-40 ${
@@ -1602,14 +1599,14 @@ export default function AdminPage() {
                           }`}
                         >
                           {arrivalUpdatingId === b.id ? (
-                            "Updating…"
+                            t("admin.common.updating")
                           ) : b.patient_arrived ? (
                             <>
-                              <UserX className="w-3.5 h-3.5" /> Mark as Not Entered
+                              <UserX className="w-3.5 h-3.5" /> {t("admin.common.markNotEntered")}
                             </>
                           ) : (
                             <>
-                              <UserCheck className="w-3.5 h-3.5" /> Mark as Entered
+                              <UserCheck className="w-3.5 h-3.5" /> {t("admin.common.markEntered")}
                             </>
                           )}
                         </button>
@@ -1620,7 +1617,7 @@ export default function AdminPage() {
                       {examsWithMatchedConsultation.has(b.id) && (
                         <div className="flex items-center gap-1.5">
                           <span className="text-[0.65rem] text-[#101820]/50 uppercase tracking-wider mr-1">
-                            Consultation:
+                            {t("admin.common.consultation")}
                           </span>
                           <button
                             onClick={() =>
@@ -1628,8 +1625,8 @@ export default function AdminPage() {
                             }
                             title={
                               b.consultation_hint_dismissed
-                                ? "This patient has a consultation — click to show it"
-                                : "Click to remove the consultation reminder"
+                                ? t("admin.common.showConsultationTitle")
+                                : t("admin.common.hideConsultationTitle")
                             }
                             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
                               !b.consultation_hint_dismissed
@@ -1638,7 +1635,7 @@ export default function AdminPage() {
                             }`}
                           >
                             <Stethoscope className="w-3.5 h-3.5" />
-                            {b.consultation_hint_dismissed ? "No consultation" : "Has consultation"}
+                            {b.consultation_hint_dismissed ? t("admin.common.noConsultation") : t("admin.common.hasConsultation")}
                           </button>
                         </div>
                       )}
@@ -1661,16 +1658,16 @@ export default function AdminPage() {
               {/* Status Tabs */}
               <div className="flex items-center gap-1.5 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
                 {[
-                  { id: "all", label: "All" },
-                  { id: "pending", label: "Pending" },
-                  { id: "confirmed", label: "Confirmed" },
-                  { id: "completed", label: "Completed" },
-                  { id: "cancelled", label: "Cancelled" },
+                  { id: "all", label: t("admin.table.statusAll") },
+                  { id: "pending", label: t("admin.table.statusPending") },
+                  { id: "confirmed", label: t("admin.table.statusConfirmed") },
+                  { id: "completed", label: t("admin.table.statusCompleted") },
+                  { id: "cancelled", label: t("admin.table.statusCancelled") },
                 ].map((tab) => (
                   <button
                     key={tab.id}
                     onClick={() => setStatusFilter(tab.id)}
-                    className={`px-4 py-2 rounded-xl text-xs font-medium uppercase tracking-[0.15em] transition-all whitespace-nowrap ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-medium uppercase tracking-wide transition-all whitespace-nowrap ${
                       statusFilter === tab.id
                         ? "bg-[#101820] text-[#f4f1eb] shadow"
                         : "text-[#101820]/60 hover:text-[#101820] hover:bg-[#f4f1eb]"
@@ -1689,11 +1686,11 @@ export default function AdminPage() {
                   onChange={(e) => setDatePreset(e.target.value)}
                   className="bg-[#f4f1eb] border border-[#101820]/15 rounded-xl px-3 py-1.5 text-xs text-[#101820] font-medium outline-none focus:border-[#b99a6b]"
                 >
-                  <option value="all">📅 All Dates (جميع التواريخ)</option>
-                  <option value="today">⚡ Today (اليوم)</option>
-                  <option value="this_month">🗓️ This Month (هذا الشهر)</option>
-                  <option value="last_month">⏳ Last Month (الشهر الماضي)</option>
-                  <option value="this_year">🏛️ This Year (هذه السنة)</option>
+                  <option value="all">{t("admin.table.allDates")}</option>
+                  <option value="today">{t("admin.table.today")}</option>
+                  <option value="this_month">{t("admin.table.thisMonth")}</option>
+                  <option value="last_month">{t("admin.table.lastMonth")}</option>
+                  <option value="this_year">{t("admin.table.thisYear")}</option>
                 </select>
 
                 {/* Month Dropdown */}
@@ -1706,7 +1703,7 @@ export default function AdminPage() {
                   }}
                   className="bg-[#f4f1eb] border border-[#101820]/15 rounded-xl px-3 py-1.5 text-xs text-[#101820] font-medium outline-none focus:border-[#b99a6b]"
                 >
-                  <option value="all">Month: All (كل الشهور)</option>
+                  <option value="all">{t("admin.table.monthAll")}</option>
                   {MONTH_NAMES.map((m) => (
                     <option key={m.value} value={m.value}>
                       {m.label}
@@ -1724,10 +1721,10 @@ export default function AdminPage() {
                   }}
                   className="bg-[#f4f1eb] border border-[#101820]/15 rounded-xl px-3 py-1.5 text-xs text-[#101820] font-medium outline-none focus:border-[#b99a6b]"
                 >
-                  <option value="all">Year: All (كل السنين)</option>
+                  <option value="all">{t("admin.table.yearAll")}</option>
                   {availableYears.map((yr) => (
                     <option key={yr} value={yr}>
-                      Year {yr}
+                      {t("admin.table.year", { year: yr })}
                     </option>
                   ))}
                 </select>
@@ -1735,13 +1732,13 @@ export default function AdminPage() {
 
               {/* Search Box */}
               <div className="relative w-full md:w-64">
-                <Search className="absolute left-3.5 top-2.5 w-4 h-4 text-[#101820]/40" />
+                <Search className="absolute left-3.5 rtl:left-auto rtl:right-3.5 top-2.5 w-4 h-4 text-[#101820]/40" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search patient, treatment, phone..."
-                  className="w-full bg-[#f4f1eb]/60 border border-[#101820]/15 rounded-xl pl-10 pr-4 py-2 text-xs text-[#101820] placeholder-[#101820]/40 outline-none focus:border-[#b99a6b] transition-colors"
+                  placeholder={t("admin.table.searchPlaceholder")}
+                  className="w-full bg-[#f4f1eb]/60 border border-[#101820]/15 rounded-xl pl-10 pr-4 rtl:pl-4 rtl:pr-10 py-2 text-xs text-[#101820] placeholder-[#101820]/40 outline-none focus:border-[#b99a6b] transition-colors"
                 />
               </div>
             </div>
@@ -1753,14 +1750,17 @@ export default function AdminPage() {
               <div className="bg-white border border-[#101820]/10 rounded-2xl p-4 shadow-sm space-y-2">
                 <div className="flex items-center justify-between text-xs font-medium text-[#101820]/60">
                   <span className="uppercase tracking-wider text-[0.68rem] text-[#b99a6b] font-semibold">
-                    🗓️ Days in {MONTH_NAMES.find((m) => m.value === selectedMonth)?.label ?? selectedMonth} {selectedYear}
+                    {t("admin.table.daysIn", {
+                      month: MONTH_NAMES.find((m) => m.value === selectedMonth)?.label.split(" (")[0] ?? selectedMonth,
+                      year: selectedYear,
+                    })}
                   </span>
                   {selectedTableDay && (
                     <button
                       onClick={() => setSelectedTableDay(null)}
                       className="inline-flex items-center gap-1 text-[0.68rem] font-medium text-[#101820]/60 hover:text-[#101820]"
                     >
-                      <X className="w-3 h-3" /> Clear day filter
+                      <X className="w-3 h-3" /> {t("admin.table.clearDayFilter")}
                     </button>
                   )}
                 </div>
@@ -1816,13 +1816,13 @@ export default function AdminPage() {
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b border-[#101820]/10 bg-[#f4f1eb]/50 text-[0.65rem] font-medium uppercase tracking-[0.2em] text-[#101820]/50">
-                      <th className="py-4 px-6">Patient</th>
-                      <th className="py-4 px-6">Treatment</th>
-                      <th className="py-4 px-6">Date & Queue</th>
-                      <th className="py-4 px-6">Payment</th>
-                      <th className="py-4 px-6">Arrival</th>
-                      <th className="py-4 px-6">Status</th>
-                      <th className="py-4 px-6 text-right">Actions</th>
+                      <th className="py-4 px-6">{t("admin.table.colPatient")}</th>
+                      <th className="py-4 px-6">{t("admin.table.colTreatment")}</th>
+                      <th className="py-4 px-6">{t("admin.table.colDateQueue")}</th>
+                      <th className="py-4 px-6">{t("admin.table.colPayment")}</th>
+                      <th className="py-4 px-6">{t("admin.table.colArrival")}</th>
+                      <th className="py-4 px-6">{t("admin.table.colStatus")}</th>
+                      <th className="py-4 px-6 text-right rtl:text-left">{t("admin.table.colActions")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#101820]/5 text-sm">
@@ -1832,10 +1832,10 @@ export default function AdminPage() {
                           <div className="flex flex-col items-center justify-center gap-2">
                             <AlertCircle className="w-8 h-8 text-[#b99a6b]" />
                             <p className="font-serif text-base text-[#101820]">
-                              No bookings found
+                              {t("admin.table.noBookingsTitle")}
                             </p>
                             <p className="text-xs text-[#101820]/50">
-                              Try adjusting your search query or status filter.
+                              {t("admin.table.noBookingsBody")}
                             </p>
                           </div>
                         </td>
@@ -1867,7 +1867,7 @@ export default function AdminPage() {
                               {isConsultation(b) ? (
                                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[#b99a6b] text-[#101820] text-xs font-semibold">
                                   <Stethoscope className="w-3.5 h-3.5" />
-                                  Consultation
+                                  {t("admin.common.consultationBadge")}
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[#f4f1eb] border border-[#101820]/10 text-xs font-serif text-[#101820]">
@@ -1876,14 +1876,14 @@ export default function AdminPage() {
                               )}
                               {consultationForCompletedId.get(b.id) && (
                                 <span
-                                  title={`Consultation booked for ${consultationForCompletedId.get(b.id)?.date}`}
+                                  title={t("admin.common.consultationBookedFor", { date: consultationForCompletedId.get(b.id)?.date ?? "" })}
                                   className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-lg bg-[#b99a6b] text-[#101820] text-[0.68rem] font-semibold"
                                 >
                                   <Stethoscope className="w-3 h-3" />
-                                  Has consultation
+                                  {t("admin.common.hasConsultation")}
                                   <button
                                     onClick={() => handleSetConsultationHint(b.id, true)}
-                                    title="Dismiss this reminder"
+                                    title={t("admin.common.dismissReminderTitle")}
                                     className="ml-0.5 rounded-full p-0.5 text-[#101820]/70 hover:bg-[#101820]/15 hover:text-[#101820] transition-colors"
                                   >
                                     <X className="w-3 h-3" />
@@ -1901,7 +1901,7 @@ export default function AdminPage() {
                             </div>
                             <div className="flex items-center gap-1.5 text-[0.72rem] text-[#101820]/50 mt-0.5">
                               <ListFilter className="w-3 h-3 text-[#101820]/30" />
-                              <span>Queue #{b.queue_number ?? "—"}</span>
+                              <span>{t("admin.agenda.queue", { number: b.queue_number ?? "—" })}</span>
                             </div>
                           </td>
 
@@ -1921,9 +1921,9 @@ export default function AdminPage() {
                               )}
                               {b.payment_method === "online"
                                 ? b.payment_status === "paid"
-                                  ? "Paid Online"
-                                  : "Online — Pending"
-                                : "Pending — Pay at Clinic"}
+                                  ? t("admin.common.paidOnline")
+                                  : t("admin.common.onlinePending")
+                                : t("admin.table.pendingPayAtClinic")}
                             </span>
                             {b.extra_charge_amount ? (
                               <div className="mt-1.5">{renderExtraChargeBadge(b)}</div>
@@ -1937,7 +1937,7 @@ export default function AdminPage() {
                               disabled={arrivalUpdatingId === b.id || (!b.patient_arrived && !canMarkEntered(b))}
                               title={
                                 !b.patient_arrived && !canMarkEntered(b)
-                                  ? "Can only mark as entered on the booking date, during working hours"
+                                  ? t("admin.common.arrivalDisabledTitle")
                                   : undefined
                               }
                               className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg font-medium transition-all disabled:cursor-not-allowed disabled:opacity-40 ${
@@ -1947,7 +1947,7 @@ export default function AdminPage() {
                               }`}
                             >
                               {b.patient_arrived ? <UserCheck className="w-3.5 h-3.5" /> : <UserX className="w-3.5 h-3.5" />}
-                              {arrivalUpdatingId === b.id ? "…" : b.patient_arrived ? "Entered" : "Not Entered"}
+                              {arrivalUpdatingId === b.id ? "…" : b.patient_arrived ? t("admin.common.entered") : t("admin.common.notEntered")}
                             </button>
                           </td>
 
@@ -1968,19 +1968,19 @@ export default function AdminPage() {
                                   : "bg-amber-500/10 border-amber-500/30 text-amber-800"
                               }`}
                             >
-                              <option value="pending">🟡 Pending</option>
-                              <option value="confirmed">🟢 Confirmed</option>
-                              <option value="completed">🔵 Completed</option>
-                              <option value="cancelled">🔴 Cancelled</option>
+                              <option value="pending">🟡 {t("admin.table.statusPending")}</option>
+                              <option value="confirmed">🟢 {t("admin.table.statusConfirmed")}</option>
+                              <option value="completed">🔵 {t("admin.table.statusCompleted")}</option>
+                              <option value="cancelled">🔴 {t("admin.table.statusCancelled")}</option>
                             </select>
                           </td>
 
                           {/* Action Buttons */}
-                          <td className="py-4 px-6 text-right">
-                            <div className="flex items-center justify-end gap-2">
+                          <td className="py-4 px-6 text-right rtl:text-left">
+                            <div className="flex items-center justify-end rtl:justify-start gap-2">
                               <button
                                 onClick={() => setSelectedBooking(b)}
-                                title="View details"
+                                title={t("admin.table.viewDetails")}
                                 className="p-2 rounded-lg bg-[#f4f1eb] hover:bg-[#101820] hover:text-white border border-[#101820]/10 transition-colors"
                               >
                                 <Eye className="w-4 h-4" />
@@ -1989,7 +1989,7 @@ export default function AdminPage() {
                               <button
                                 onClick={() => handleDelete(b.id)}
                                 disabled={deletingId === b.id}
-                                title="Delete record"
+                                title={t("admin.table.deleteRecord")}
                                 className="p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-600 transition-colors"
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -2017,31 +2017,31 @@ export default function AdminPage() {
                 </div>
                 <div>
                   <h2 className="font-serif text-2xl font-medium text-[#101820]">
-                    Consultation Requests
+                    {t("admin.consultations.title")}
                   </h2>
                   <p className="text-xs text-[#101820]/50 mt-0.5">
-                    Consultation requests (
-                    <strong className="text-[#101820]">{consultationBookings.length}</strong>) plus
-                    completed exams whose patient has a consultation to follow (
-                    <strong className="text-[#101820]">{completedExamsWithConsultation.length}</strong>).
+                    {t("admin.consultations.subtitle", {
+                      requests: consultationBookings.length,
+                      followUps: completedExamsWithConsultation.length,
+                    })}
                   </p>
                 </div>
               </div>
 
               {/* Search Box for Consultations */}
               <div className="relative w-full sm:w-72">
-                <Search className="absolute left-3.5 top-2.5 w-4 h-4 text-[#101820]/40" />
+                <Search className="absolute left-3.5 rtl:left-auto rtl:right-3.5 top-2.5 w-4 h-4 text-[#101820]/40" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search consultation by phone, patient name..."
-                  className="w-full bg-[#f4f1eb] border border-[#101820]/15 rounded-xl pl-10 pr-8 py-2 text-xs text-[#101820] placeholder-[#101820]/40 outline-none focus:border-[#b99a6b] transition-colors"
+                  placeholder={t("admin.consultations.searchPlaceholder")}
+                  className="w-full bg-[#f4f1eb] border border-[#101820]/15 rounded-xl pl-10 pr-8 rtl:pl-8 rtl:pr-10 py-2 text-xs text-[#101820] placeholder-[#101820]/40 outline-none focus:border-[#b99a6b] transition-colors"
                 />
                 {searchQuery && (
                   <button
                     onClick={() => setSearchQuery("")}
-                    className="absolute right-2.5 top-2.5 text-[#101820]/40 hover:text-[#101820]"
+                    className="absolute right-2.5 rtl:right-auto rtl:left-2.5 top-2.5 text-[#101820]/40 hover:text-[#101820]"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -2056,11 +2056,10 @@ export default function AdminPage() {
                     <Stethoscope className="w-7 h-7" />
                   </div>
                   <h3 className="font-serif text-xl font-medium text-[#101820]">
-                    No consultation requests yet
+                    {t("admin.consultations.emptyTitle")}
                   </h3>
                   <p className="text-xs text-[#101820]/60 leading-relaxed">
-                    When a patient books a &ldquo;Consultation&rdquo; from the website, it appears here —
-                    separate from normal treatment appointments.
+                    {t("admin.consultations.emptyBody")}
                   </p>
                 </div>
               </div>
@@ -2077,7 +2076,7 @@ export default function AdminPage() {
                         {/* Consultation badge — distinguishes it from appointments */}
                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#b99a6b] text-[#101820] text-xs font-semibold">
                           <Stethoscope className="w-3.5 h-3.5" />
-                          Consultation
+                          {t("admin.common.consultationBadge")}
                         </span>
 
                         {/* Status badge */}
@@ -2098,7 +2097,7 @@ export default function AdminPage() {
                         {/* Queue number */}
                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#f4f1eb] text-[#101820] text-xs font-medium border border-[#101820]/10">
                           <ListFilter className="w-3.5 h-3.5 text-[#b99a6b]" />
-                          Queue #{b.queue_number ?? "—"}
+                          {t("admin.agenda.queue", { number: b.queue_number ?? "—" })}
                         </span>
                       </div>
 
@@ -2128,7 +2127,7 @@ export default function AdminPage() {
                           <Clock3 className="w-3.5 h-3.5 text-[#b99a6b]" /> {formatEstimatedTime(b)}
                         </span>
                         <span className="flex items-center gap-1.5 text-[#101820]/45">
-                          <CalendarClock className="w-3.5 h-3.5" /> Requested {formatCreatedAt(b.created_at)}
+                          <CalendarClock className="w-3.5 h-3.5" /> {t("admin.consultations.requested", { date: formatCreatedAt(b.created_at) })}
                         </span>
                       </div>
 
@@ -2148,7 +2147,7 @@ export default function AdminPage() {
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#f4f1eb] hover:bg-[#101820] hover:text-white border border-[#101820]/15 text-xs text-[#101820] transition-colors"
                         >
                           <PhoneCall className="w-3.5 h-3.5 text-[#b99a6b]" />
-                          <span>Call</span>
+                          <span>{t("admin.common.call")}</span>
                         </a>
                         <a
                           href={`https://wa.me/${b.phone.replace(/[^0-9]/g, "")}`}
@@ -2157,19 +2156,19 @@ export default function AdminPage() {
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-xs text-emerald-800 transition-colors"
                         >
                           <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>WhatsApp</span>
+                          <span>{t("admin.common.whatsapp")}</span>
                         </a>
                         <button
                           onClick={() => setSelectedBooking(b)}
                           className="p-1.5 rounded-xl bg-[#f4f1eb] hover:bg-[#101820] hover:text-white border border-[#101820]/15 text-[#101820] transition-colors"
-                          title="View Full Info"
+                          title={t("admin.common.viewFullInfo")}
                         >
                           <Eye className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleDelete(b.id)}
                           className="p-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-600 transition-colors"
-                          title="Delete Consultation"
+                          title={t("admin.table.deleteRecord")}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -2178,7 +2177,7 @@ export default function AdminPage() {
                       {/* Status switcher */}
                       <div className="flex items-center gap-1.5 mt-1">
                         <span className="text-[0.65rem] text-[#101820]/50 uppercase tracking-wider mr-1">
-                          Status:
+                          {t("admin.common.status")}
                         </span>
                         <button
                           onClick={() => handleStatusChange(b.id, "confirmed")}
@@ -2188,7 +2187,7 @@ export default function AdminPage() {
                               : "bg-[#f4f1eb] text-[#101820]/70 hover:bg-emerald-500/10 hover:text-emerald-700"
                           }`}
                         >
-                          Confirm
+                          {t("admin.common.confirm")}
                         </button>
                         <button
                           onClick={() => handleStatusChange(b.id, "completed")}
@@ -2198,7 +2197,7 @@ export default function AdminPage() {
                               : "bg-[#f4f1eb] text-[#101820]/70 hover:bg-blue-500/10 hover:text-blue-700"
                           }`}
                         >
-                          Complete
+                          {t("admin.common.complete")}
                         </button>
                         <button
                           onClick={() => handleStatusChange(b.id, "cancelled")}
@@ -2208,7 +2207,7 @@ export default function AdminPage() {
                               : "bg-[#f4f1eb] text-[#101820]/70 hover:bg-red-500/10 hover:text-red-700"
                           }`}
                         >
-                          Cancel
+                          {t("admin.common.cancel")}
                         </button>
                       </div>
                     </div>
@@ -2229,15 +2228,15 @@ export default function AdminPage() {
                           {/* Completed-exam context tag */}
                           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-700 text-xs font-medium">
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            Completed exam
+                            {t("admin.consultations.completedExamTag")}
                           </span>
                           {/* Follow-up consultation flag + remove-from-list ✕ */}
                           <span className="inline-flex items-center gap-1 pl-3 pr-1.5 py-1 rounded-xl bg-[#b99a6b] text-[#101820] text-xs font-semibold">
                             <Stethoscope className="w-3.5 h-3.5" />
-                            Has consultation
+                            {t("admin.common.hasConsultation")}
                             <button
                               onClick={() => handleSetConsultationHint(b.id, true)}
-                              title="Remove from this list"
+                              title={t("admin.consultations.removeFromListTitle")}
                               className="ml-0.5 rounded-full p-0.5 text-[#101820]/70 hover:bg-[#101820]/15 hover:text-[#101820] transition-colors"
                             >
                               <X className="w-3.5 h-3.5" />
@@ -2245,7 +2244,7 @@ export default function AdminPage() {
                           </span>
                           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#f4f1eb] text-[#101820] text-xs font-medium border border-[#101820]/10">
                             <ListFilter className="w-3.5 h-3.5 text-[#b99a6b]" />
-                            Queue #{b.queue_number ?? "—"}
+                            {t("admin.agenda.queue", { number: b.queue_number ?? "—" })}
                           </span>
                         </div>
 
@@ -2267,14 +2266,14 @@ export default function AdminPage() {
 
                         <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-xs text-[#101820]/70">
                           <span className="flex items-center gap-1.5">
-                            <FileText className="w-3.5 h-3.5 text-[#b99a6b]" /> Exam: {b.treatment}
+                            <FileText className="w-3.5 h-3.5 text-[#b99a6b]" /> {t("admin.consultations.exam", { treatment: b.treatment })}
                           </span>
                           <span className="flex items-center gap-1.5">
-                            <CalendarIcon className="w-3.5 h-3.5 text-[#b99a6b]" /> Exam day {b.date}
+                            <CalendarIcon className="w-3.5 h-3.5 text-[#b99a6b]" /> {t("admin.consultations.examDay", { date: b.date })}
                           </span>
                           {linked && (
                             <span className="flex items-center gap-1.5 text-[#b99a6b] font-medium">
-                              <Stethoscope className="w-3.5 h-3.5" /> Consultation {linked.date} · {linked.status}
+                              <Stethoscope className="w-3.5 h-3.5" /> {t("admin.consultations.linkedConsultation", { date: linked.date, status: linked.status })}
                             </span>
                           )}
                         </div>
@@ -2287,7 +2286,7 @@ export default function AdminPage() {
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#f4f1eb] hover:bg-[#101820] hover:text-white border border-[#101820]/15 text-xs text-[#101820] transition-colors"
                           >
                             <PhoneCall className="w-3.5 h-3.5 text-[#b99a6b]" />
-                            <span>Call</span>
+                            <span>{t("admin.common.call")}</span>
                           </a>
                           <a
                             href={`https://wa.me/${b.phone.replace(/[^0-9]/g, "")}`}
@@ -2296,12 +2295,12 @@ export default function AdminPage() {
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-xs text-emerald-800 transition-colors"
                           >
                             <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>WhatsApp</span>
+                            <span>{t("admin.common.whatsapp")}</span>
                           </a>
                           <button
                             onClick={() => setSelectedBooking(b)}
                             className="p-1.5 rounded-xl bg-[#f4f1eb] hover:bg-[#101820] hover:text-white border border-[#101820]/15 text-[#101820] transition-colors"
-                            title="View Full Info"
+                            title={t("admin.common.viewFullInfo")}
                           >
                             <Eye className="w-4 h-4" />
                           </button>
@@ -2309,10 +2308,10 @@ export default function AdminPage() {
                         <button
                           onClick={() => handleSetConsultationHint(b.id, true)}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#f4f1eb] text-[#101820]/70 hover:bg-red-500/10 hover:text-red-700 border border-[#101820]/15 text-xs transition-colors"
-                          title="Remove this follow-up from the consultations list"
+                          title={t("admin.consultations.removeFromListTitle")}
                         >
                           <X className="w-3.5 h-3.5" />
-                          <span>Remove from list</span>
+                          <span>{t("admin.consultations.removeFromList")}</span>
                         </button>
                       </div>
                     </div>
@@ -2343,7 +2342,7 @@ export default function AdminPage() {
                       {selectedBooking.full_name}
                     </h3>
                     <span className="text-xs text-[#b99a6b] font-medium bg-[#b99a6b]/15 px-2.5 py-0.5 rounded-full">
-                      Patient Record
+                      {t("admin.record.badge")}
                     </span>
                   </div>
                   <div className="flex items-center gap-3 text-xs text-[#101820]/60 mt-0.5 font-mono">
@@ -2364,15 +2363,15 @@ export default function AdminPage() {
             <div className="grid grid-cols-3 gap-3 bg-[#f4f1eb] rounded-2xl p-4 border border-[#101820]/10 text-center">
               <div>
                 <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50 font-medium">
-                  Total Visits (إجمالي الزيارات)
+                  {t("admin.record.totalVisits")}
                 </span>
                 <span className="font-serif text-xl font-bold text-[#101820]">
-                  {patientVisits.length} Visit{patientVisits.length > 1 ? "s" : ""}
+                  {t("admin.record.visitCount", { count: patientVisits.length, plural: patientVisits.length > 1 ? "s" : "" })}
                 </span>
               </div>
               <div>
                 <span className="block text-[0.65rem] uppercase tracking-wider text-emerald-800 font-medium">
-                  Completed (الزيارات المكتملة)
+                  {t("admin.record.completedVisits")}
                 </span>
                 <span className="font-serif text-xl font-bold text-emerald-700">
                   {patientVisits.filter((v) => v.status === "completed").length}
@@ -2380,7 +2379,7 @@ export default function AdminPage() {
               </div>
               <div>
                 <span className="block text-[0.65rem] uppercase tracking-wider text-[#101820]/50 font-medium">
-                  First Visit (أول زيارة)
+                  {t("admin.record.firstVisit")}
                 </span>
                 <span className="font-serif text-sm font-semibold text-[#101820] mt-1 block">
                   {patientVisits[patientVisits.length - 1]?.date || "—"}
@@ -2396,7 +2395,7 @@ export default function AdminPage() {
                   className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#f4f1eb] border border-[#101820]/15 hover:bg-[#101820] hover:text-white text-xs text-[#101820] font-medium transition-colors"
                 >
                   <PhoneCall className="w-3.5 h-3.5 text-[#b99a6b]" />
-                  <span>Call {selectedBooking.phone}</span>
+                  <span>{t("admin.record.callPhone", { phone: selectedBooking.phone })}</span>
                 </a>
                 <a
                   href={`https://wa.me/${selectedBooking.phone.replace(/[^0-9]/g, "")}`}
@@ -2405,7 +2404,7 @@ export default function AdminPage() {
                   className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-800 hover:bg-emerald-500/20 text-xs font-medium transition-colors"
                 >
                   <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>WhatsApp Chat</span>
+                  <span>{t("admin.record.whatsappChat")}</span>
                 </a>
               </div>
 
@@ -2425,7 +2424,7 @@ export default function AdminPage() {
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#101820] text-[#f4f1eb] text-xs font-medium hover:bg-[#101820]/85 transition-colors shadow-sm"
               >
                 <Plus className="w-3.5 h-3.5 text-[#b99a6b]" />
-                <span>Book Next Visit</span>
+                <span>{t("admin.record.bookNextVisit")}</span>
               </button>
             </div>
 
@@ -2434,17 +2433,17 @@ export default function AdminPage() {
               <div className="flex items-center justify-between">
                 <h4 className="font-serif text-base font-medium text-[#101820] flex items-center gap-2">
                   <CalendarIcon className="w-4 h-4 text-[#b99a6b]" />
-                  Patient Medical & Visit History (سجل الحجوزات والزيارات)
+                  {t("admin.record.historyTitle")}
                 </h4>
                 <span className="text-xs text-[#101820]/50 font-mono">
-                  {patientVisits.length} Record{patientVisits.length > 1 ? "s" : ""}
+                  {t("admin.record.recordCount", { count: patientVisits.length, plural: patientVisits.length > 1 ? "s" : "" })}
                 </span>
               </div>
 
               {isLoadingPatientVisits && (
                 <div className="flex items-center gap-2 text-xs text-[#101820]/50 py-6 justify-center">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#b99a6b]" />
-                  Loading this patient&apos;s full record…
+                  {t("admin.record.loading")}
                 </div>
               )}
 
@@ -2468,7 +2467,7 @@ export default function AdminPage() {
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#101820]/10 pb-2.5 mb-3">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-serif font-bold text-[#101820]">
-                          Visit #{patientVisits.length - index}
+                          {t("admin.record.visitNumber", { number: patientVisits.length - index })}
                         </span>
                         <span className="text-xs text-[#101820]/40">•</span>
                         <span className="text-xs font-medium text-[#101820] flex items-center gap-1">
@@ -2499,7 +2498,7 @@ export default function AdminPage() {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs mb-3">
                       <div>
                         <span className="block text-[0.62rem] uppercase tracking-wider text-[#101820]/50">
-                          Service / Treatment
+                          {t("admin.record.serviceTreatment")}
                         </span>
                         <span className="font-serif font-medium text-[#b99a6b] text-sm">
                           {visit.treatment}
@@ -2508,7 +2507,7 @@ export default function AdminPage() {
 
                       <div>
                         <span className="block text-[0.62rem] uppercase tracking-wider text-[#101820]/50">
-                          Queue Number
+                          {t("admin.record.queueNumber")}
                         </span>
                         <span className="font-semibold text-[#101820]">
                           #{visit.queue_number ?? "—"}
@@ -2517,23 +2516,23 @@ export default function AdminPage() {
 
                       <div>
                         <span className="block text-[0.62rem] uppercase tracking-wider text-[#101820]/50">
-                          Payment Method
+                          {t("admin.record.paymentMethod")}
                         </span>
                         <span className="text-[#101820]">
-                          {visit.payment_method === "online" ? "Online" : "Pay at Clinic"}
+                          {visit.payment_method === "online" ? t("admin.record.online") : t("admin.common.payAtClinic")}
                         </span>
                       </div>
 
                       <div>
                         <span className="block text-[0.62rem] uppercase tracking-wider text-[#101820]/50">
-                          Patient Arrival
+                          {t("admin.record.patientArrival")}
                         </span>
                         <span
                           className={`font-medium ${
                             visit.patient_arrived ? "text-emerald-700" : "text-[#101820]/60"
                           }`}
                         >
-                          {visit.patient_arrived ? "✓ Entered" : "Not Entered"}
+                          {visit.patient_arrived ? `✓ ${t("admin.common.entered")}` : t("admin.common.notEntered")}
                         </span>
                       </div>
                     </div>
@@ -2551,7 +2550,7 @@ export default function AdminPage() {
                         {renderExtraChargeBadge(visit) || (
                           <span className="inline-flex items-center gap-1.5 text-xs text-[#101820]/40">
                             <Receipt className="w-3.5 h-3.5 text-[#101820]/25" />
-                            No extra charge on this visit
+                            {t("admin.extraCharge.noCharge")}
                           </span>
                         )}
                       </div>
@@ -2568,7 +2567,7 @@ export default function AdminPage() {
                         }`}
                       >
                         <Receipt className="w-3.5 h-3.5" />
-                        {visit.extra_charge_amount ? "Edit Charge" : "Add Charge"}
+                        {visit.extra_charge_amount ? t("admin.extraCharge.editCharge") : t("admin.extraCharge.addCharge")}
                       </button>
                     </div>
                     {renderExtraChargePanel(visit) && (
@@ -2578,7 +2577,7 @@ export default function AdminPage() {
                     {/* Status Update Control for this visit */}
                     <div className="flex items-center justify-between border-t border-[#101820]/10 pt-2.5">
                       <span className="text-[0.65rem] text-[#101820]/50 uppercase tracking-wider">
-                        Update Status:
+                        {t("admin.record.updateStatus")}
                       </span>
                       <div className="flex items-center gap-1.5">
                         <button
@@ -2589,7 +2588,7 @@ export default function AdminPage() {
                               : "bg-[#f4f1eb] text-[#101820]/70 hover:bg-emerald-500/10 hover:text-emerald-800"
                           }`}
                         >
-                          Confirm
+                          {t("admin.common.confirm")}
                         </button>
                         <button
                           onClick={() => handleStatusChange(visit.id, "completed")}
@@ -2599,7 +2598,7 @@ export default function AdminPage() {
                               : "bg-[#f4f1eb] text-[#101820]/70 hover:bg-blue-500/10 hover:text-blue-800"
                           }`}
                         >
-                          Complete
+                          {t("admin.common.complete")}
                         </button>
                         <button
                           onClick={() => handleStatusChange(visit.id, "cancelled")}
@@ -2609,7 +2608,7 @@ export default function AdminPage() {
                               : "bg-[#f4f1eb] text-[#101820]/70 hover:bg-red-500/10 hover:text-red-700"
                           }`}
                         >
-                          Cancel
+                          {t("admin.common.cancel")}
                         </button>
                       </div>
                     </div>
@@ -2628,10 +2627,10 @@ export default function AdminPage() {
             <div className="flex items-center justify-between border-b border-[#101820]/10 pb-4">
               <div>
                 <span className="text-[0.65rem] font-medium uppercase tracking-[0.2em] text-[#b99a6b]">
-                  Staff Registration
+                  {t("admin.newBooking.staffRegistration")}
                 </span>
                 <h3 className="font-serif text-xl font-medium text-[#101820] mt-0.5">
-                  New Appointment for {selectedDate}
+                  {t("admin.newBooking.title", { date: selectedDate })}
                 </h3>
               </div>
               <button
@@ -2652,7 +2651,7 @@ export default function AdminPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[#101820]/60 mb-1">
-                    Patient Full Name *
+                    {t("admin.newBooking.fullNameLabel")}
                   </label>
                   <input
                     type="text"
@@ -2662,13 +2661,13 @@ export default function AdminPage() {
                       setNewForm({ ...newForm, full_name: e.target.value })
                     }
                     className="w-full bg-[#f4f1eb]/60 border border-[#101820]/15 rounded-xl px-3 py-2 text-[#101820] outline-none focus:border-[#b99a6b]"
-                    placeholder="e.g. Mahmoud Ali"
+                    placeholder={t("admin.newBooking.fullNamePlaceholder")}
                   />
                 </div>
 
                 <div>
                   <label className="block text-[#101820]/60 mb-1">
-                    Phone Number *
+                    {t("admin.newBooking.phoneLabel")}
                   </label>
                   <input
                     type="tel"
@@ -2682,7 +2681,7 @@ export default function AdminPage() {
               </div>
 
               <div>
-                <label className="block text-[#101820]/60 mb-1">Email (Optional)</label>
+                <label className="block text-[#101820]/60 mb-1">{t("admin.newBooking.emailLabel")}</label>
                 <input
                   type="email"
                   value={newForm.email}
@@ -2694,7 +2693,7 @@ export default function AdminPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[#101820]/60 mb-1">Service *</label>
+                  <label className="block text-[#101820]/60 mb-1">{t("admin.newBooking.serviceLabel")}</label>
                   <select
                     value={newForm.treatment}
                     onChange={(e) =>
@@ -2702,16 +2701,16 @@ export default function AdminPage() {
                     }
                     className="w-full bg-[#f4f1eb] border border-[#101820]/15 rounded-xl px-3 py-2 text-[#101820] outline-none focus:border-[#b99a6b]"
                   >
-                    {SERVICE_OPTIONS.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
+                    {SERVICE_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
                       </option>
                     ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-[#101820]/60 mb-1">Booking Date *</label>
+                  <label className="block text-[#101820]/60 mb-1">{t("admin.newBooking.dateLabel")}</label>
                   <input
                     type="date"
                     required
@@ -2722,20 +2721,19 @@ export default function AdminPage() {
                 </div>
               </div>
               <p className="text-[0.65rem] text-[#101820]/40 -mt-2">
-                A queue number is assigned automatically for this date — payment defaults to
-                &ldquo;Pay at Clinic&rdquo; for staff-entered bookings.
+                {t("admin.newBooking.queueNote")}
               </p>
 
               <div>
                 <label className="block text-[#101820]/60 mb-1">
-                  Staff Note (Optional)
+                  {t("admin.newBooking.messageLabel")}
                 </label>
                 <textarea
                   rows={2}
                   value={newForm.message}
                   onChange={(e) => setNewForm({ ...newForm, message: e.target.value })}
                   className="w-full bg-[#f4f1eb]/60 border border-[#101820]/15 rounded-xl px-3 py-2 text-[#101820] outline-none focus:border-[#b99a6b] resize-none"
-                  placeholder="Notes from call or walk-in..."
+                  placeholder={t("admin.newBooking.messagePlaceholder")}
                 />
               </div>
 
@@ -2745,14 +2743,14 @@ export default function AdminPage() {
                   onClick={() => setShowNewModal(false)}
                   className="px-4 py-2 rounded-xl bg-[#f4f1eb] hover:bg-[#101820] hover:text-white text-[#101820]/70 text-xs font-medium transition-colors"
                 >
-                  Cancel
+                  {t("admin.extraCharge.cancel")}
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmittingNew}
                   className="px-5 py-2 rounded-xl bg-[#101820] text-[#f4f1eb] text-xs font-medium uppercase tracking-[0.15em] hover:bg-[#101820]/85 transition-colors shadow-sm disabled:opacity-50"
                 >
-                  {isSubmittingNew ? "Saving..." : "Save Appointment"}
+                  {isSubmittingNew ? t("admin.newBooking.submitting") : t("admin.newBooking.submit")}
                 </button>
               </div>
             </form>

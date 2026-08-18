@@ -5,8 +5,10 @@ import Link from "next/link";
 import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { ArrowUpRight } from "lucide-react";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function FinalCTA() {
+  const { t } = useLanguage();
   const sectionRef = useRef<HTMLElement>(null);
 
   useIsoLayoutEffect(() => {
@@ -54,21 +56,21 @@ export function FinalCTA() {
       <div className="relative mx-auto flex max-w-4xl flex-col items-center text-center">
         <p className="fc-reveal mb-8 flex items-center gap-3 text-[0.7rem] font-medium uppercase tracking-[0.32em] text-gold">
           <span className="h-px w-8 bg-gold/60" aria-hidden="true" />
-          Ready when you are
+          {t("site.finalCTA.eyebrow")}
           <span className="h-px w-8 bg-gold/60" aria-hidden="true" />
         </p>
 
         <h2 className="fc-reveal font-serif text-[3rem] font-medium leading-[0.98] tracking-[-0.02em] text-cream sm:text-7xl lg:text-8xl">
-          Your smile
+          {t("site.finalCTA.headingLine1")}
           <br />
-          <em className="italic text-cream/90">starts here.</em>
+          <em className="italic text-cream/90">{t("site.finalCTA.headingLine2")}</em>
         </h2>
 
         <Link
           href="/booking"
           className="group mt-12 inline-flex items-center gap-2.5 rounded-full bg-cream px-9 py-5 text-xs font-medium uppercase tracking-[0.2em] text-ink transition-all duration-300 hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold"
         >
-          Book an Appointment
+          {t("site.finalCTA.bookAppointment")}
           <ArrowUpRight
             className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
             strokeWidth={1.5}

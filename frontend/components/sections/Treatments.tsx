@@ -5,6 +5,7 @@ import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { ArrowUpRight, Plus } from "lucide-react";
 import { TREATMENTS } from "@/lib/constants";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 // High resolution photography preview images for each treatment.
 const TREATMENT_PREVIEWS = [
@@ -20,6 +21,14 @@ const PREVIEW_W = 300;
 const PREVIEW_H = 208;
 
 export function Treatments() {
+  const { t } = useLanguage();
+  // TREATMENTS carries the numbers/preview-image order (locale-agnostic);
+  // titles/descriptions come from the dictionary, indexed positionally.
+  const localizedTreatments = TREATMENTS.map((tr, i) => ({
+    ...tr,
+    title: t(`site.treatments.t${i + 1}Title`),
+    description: t(`site.treatments.t${i + 1}Desc`),
+  }));
   const sectionRef = useRef<HTMLElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -109,15 +118,15 @@ export function Treatments() {
         <div className="mb-16 max-w-3xl md:mb-20">
           <p className="tr-head mb-8 flex items-center gap-3 text-[0.7rem] font-medium uppercase tracking-[0.32em] text-ink/50">
             <span className="h-px w-8 bg-gold" aria-hidden="true" />
-            Treatments
+            {t("site.treatments.eyebrow")}
           </p>
           <h2 className="tr-head text-[2.5rem] font-medium leading-[1.02] tracking-[-0.02em] text-ink sm:text-5xl lg:text-6xl">
-            Exceptional care
+            {t("site.treatments.headingLine1")}
             <br />
-            for every <em className="italic text-ink/90">smile.</em>
+            {t("site.treatments.headingPrefix")} <em className="italic text-ink/90">{t("site.treatments.headingSmile")}</em>
           </h2>
           <p className="tr-head mt-6 max-w-lg text-base leading-relaxed text-ink/60 sm:text-lg">
-            From everyday dental care to complete smile transformations.
+            {t("site.treatments.description")}
           </p>
         </div>
 
@@ -139,26 +148,26 @@ export function Treatments() {
               <div className="relative h-full w-full">
                 <img
                   src={TREATMENT_PREVIEWS[active]}
-                  alt={TREATMENTS[active].title}
+                  alt={localizedTreatments[active].title}
                   loading="lazy"
                   decoding="async"
                   className="h-full w-full object-cover"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-ink/70 via-ink/20 to-transparent" />
                 <span className="absolute left-5 top-3 font-serif text-6xl leading-none text-white/30">
-                  {TREATMENTS[active].number}
+                  {localizedTreatments[active].number}
                 </span>
                 <span className="absolute bottom-4 left-5 text-xs font-medium uppercase tracking-[0.22em] text-white">
-                  {TREATMENTS[active].title}
+                  {localizedTreatments[active].title}
                 </span>
               </div>
             )}
           </div>
 
           {/* Rows */}
-          {TREATMENTS.map((t, i) => (
+          {localizedTreatments.map((tr, i) => (
             <div
-              key={t.number}
+              key={tr.number}
               className="tr-row group border-t border-ink/12 last:border-b"
             >
               <button
@@ -169,16 +178,16 @@ export function Treatments() {
                 className="relative flex w-full items-center gap-4 py-7 text-left transition-colors duration-500 md:gap-8 md:py-9 lg:group-hover:bg-beige/40"
               >
                 <span className="w-8 shrink-0 text-xs font-medium tabular-nums tracking-widest text-ink/40 transition-colors duration-300 group-hover:text-gold md:w-12">
-                  {t.number}
+                  {tr.number}
                 </span>
 
                 <span className="flex-1 font-serif text-[1.6rem] font-medium leading-tight tracking-tight text-ink transition-transform duration-500 group-hover:translate-x-1 md:text-4xl lg:group-hover:translate-x-3">
-                  {t.title}
+                  {tr.title}
                 </span>
 
                 {/* Desktop inline description */}
                 <span className="hidden max-w-[15rem] text-sm leading-snug text-ink/50 lg:block xl:max-w-xs">
-                  {t.description}
+                  {tr.description}
                 </span>
 
                 {/* Desktop arrow */}
@@ -207,12 +216,12 @@ export function Treatments() {
                 <div className="overflow-hidden">
                   <div className="pb-8 pl-12 pr-2">
                     <p className="max-w-md text-sm leading-relaxed text-ink/60">
-                      {t.description}
+                      {tr.description}
                     </p>
                     <div className="relative mt-5 h-36 w-full overflow-hidden rounded-lg">
                       <img
                         src={TREATMENT_PREVIEWS[i]}
-                        alt={t.title}
+                        alt={tr.title}
                         loading="lazy"
                         decoding="async"
                         className="h-full w-full object-cover"

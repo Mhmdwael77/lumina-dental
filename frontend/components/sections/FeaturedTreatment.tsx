@@ -5,8 +5,10 @@ import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { ArrowRight } from "lucide-react";
 import { Grain } from "@/components/ui/Grain";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function FeaturedTreatment() {
+  const { t } = useLanguage();
   const sectionRef = useRef<HTMLElement>(null);
 
   useIsoLayoutEffect(() => {
@@ -64,23 +66,22 @@ export function FeaturedTreatment() {
         <div className="order-2 lg:order-1">
           <p className="ft-copy mb-8 flex items-center gap-3 text-[0.7rem] font-medium uppercase tracking-[0.32em] text-ink/50">
             <span className="h-px w-8 bg-gold" aria-hidden="true" />
-            Featured Treatment
+            {t("site.featuredTreatment.eyebrow")}
           </p>
           <h2 className="ft-copy font-serif text-[3.25rem] font-medium leading-[0.95] tracking-[-0.02em] text-ink sm:text-7xl lg:text-8xl">
-            Smile
+            {t("site.featuredTreatment.headingLine1")}
             <br />
-            <span className="italic text-ink/90">Makeover</span>
+            <span className="italic text-ink/90">{t("site.featuredTreatment.headingLine2")}</span>
           </h2>
           <p className="ft-copy mt-8 max-w-md text-base leading-relaxed text-ink/60 sm:text-lg">
-            A natural-looking transformation designed around your features,
-            goals, and confidence.
+            {t("site.featuredTreatment.description")}
           </p>
           <a
             href="#treatments"
             className="ft-copy group mt-10 inline-flex items-center gap-3 text-xs font-medium uppercase tracking-[0.22em] text-ink"
           >
             <span className="relative">
-              Explore Treatment
+              {t("site.featuredTreatment.exploreTreatment")}
               <span className="absolute -bottom-1 left-0 h-px w-full origin-left scale-x-0 bg-gold transition-transform duration-500 group-hover:scale-x-100" />
             </span>
             <ArrowRight
@@ -112,7 +113,7 @@ export function FeaturedTreatment() {
             {/* Overlay caption */}
             <div className="absolute inset-x-0 bottom-0 flex items-end justify-between p-6 md:p-8">
               <span className="text-[0.65rem] font-medium uppercase tracking-[0.28em] text-cream/90">
-                Signature Service
+                {t("site.featuredTreatment.signatureService")}
               </span>
               <span className="font-serif text-5xl leading-none text-cream/30">
                 01

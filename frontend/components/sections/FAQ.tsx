@@ -5,8 +5,14 @@ import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { Plus } from "lucide-react";
 import { FAQ_ITEMS } from "@/lib/constants";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function FAQ() {
+  const { t } = useLanguage();
+  const localizedFaqItems = FAQ_ITEMS.map((item, i) => ({
+    q: t(`site.faq.q${i + 1}`),
+    a: t(`site.faq.a${i + 1}`),
+  }));
   const sectionRef = useRef<HTMLElement>(null);
   const [open, setOpen] = useState<number | null>(0);
 
@@ -36,18 +42,18 @@ export function FAQ() {
         <div className="lg:sticky lg:top-32 lg:self-start">
           <p className="faq-reveal mb-8 flex items-center gap-3 text-[0.7rem] font-medium uppercase tracking-[0.32em] text-ink/50">
             <span className="h-px w-8 bg-gold" aria-hidden="true" />
-            FAQ
+            {t("site.faq.eyebrow")}
           </p>
           <h2 className="faq-reveal font-serif text-[2.5rem] font-medium leading-[1.02] tracking-[-0.02em] text-ink sm:text-5xl lg:text-6xl">
-            Questions,
+            {t("site.faq.headingLine1")}
             <br />
-            <em className="italic text-ink/90">answered.</em>
+            <em className="italic text-ink/90">{t("site.faq.headingLine2")}</em>
           </h2>
         </div>
 
         {/* Accordion */}
         <div className="faq-reveal">
-          {FAQ_ITEMS.map((item, i) => {
+          {localizedFaqItems.map((item, i) => {
             const isOpen = open === i;
             return (
               <div key={item.q} className="border-t border-ink/12 last:border-b">

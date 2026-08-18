@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import { Alexandria } from "next/font/google";
 import "./globals.css";
 import { SmoothScroll } from "@/components/providers/SmoothScroll";
 import { CLINIC, REVIEW_SUMMARY } from "@/lib/constants";
@@ -16,6 +17,15 @@ const inter = localFont({
   variable: "--font-inter",
   display: "swap",
   weight: "400 700",
+});
+
+// Arabic typography — Alexandria for everything, swapped in via CSS (see
+// globals.css `html[lang="ar"]`) once Arabic is the active language,
+// alongside the Playfair/Inter pair above used for English.
+const alexandria = Alexandria({
+  subsets: ["arabic", "latin"],
+  variable: "--font-alexandria",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -88,7 +98,7 @@ const jsonLd = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${playfair.variable} ${inter.variable}`}>
+    <html lang="en" className={`${playfair.variable} ${inter.variable} ${alexandria.variable}`}>
       <head>
         {/*
          * Preload critical 3D model and above-the-fold image assets

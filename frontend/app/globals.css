@@ -28,6 +28,40 @@
   --foreground: var(--color-ink);
 }
 
+/* Arabic typography — Alexandria for everything (not --font-sans/
+   --font-serif themselves, since @theme inline bakes those into a literal
+   var(--font-inter)/var(--font-playfair) reference in every generated
+   utility) so both the .font-sans/.font-serif utilities and the plain
+   body/h1-h4 rules below pick up Alexandria automatically, in both /admin
+   and the public site. */
+html[lang="ar"] {
+  --font-inter: var(--font-alexandria), ui-sans-serif, system-ui, sans-serif;
+  --font-playfair: var(--font-alexandria), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Keep plain Western digits either way — Cairo/Alexandria's "locl" OpenType
+   table would otherwise swap them for Eastern Arabic-Indic
+   numerals once lang="ar" is set, which reads oddly mixed with the queue
+   numbers, phone numbers, and dates staff are used to. */
+html[lang="ar"] {
+  font-feature-settings: "locl" 0;
+}
+
+/* The big display headings were tuned as tight leading (0.95–1.05) for
+   Playfair's Latin letterforms, which have almost no ascender/descender
+   overshoot. Alexandria's taller connecting strokes collide between lines
+   at that leading, so Arabic headings need noticeably more room and no
+   negative letter-spacing. Left unlayered (not inside @layer) so it wins
+   over the per-heading `leading-[…]`/`tracking-[…]` Tailwind utilities,
+   which live in the lower-priority `utilities` cascade layer. */
+html[lang="ar"] h1,
+html[lang="ar"] h2,
+html[lang="ar"] h3,
+html[lang="ar"] h4 {
+  line-height: 1.6;
+  letter-spacing: normal;
+}
+
 /* --------------------------------------------------------------------------
    Base resets & smooth visual defaults
    Kept inside @layer base so Tailwind utilities always win over these

@@ -5,13 +5,20 @@ import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { ArrowLeft, ArrowRight, Star } from "lucide-react";
 import { REVIEW_SUMMARY, TESTIMONIALS } from "@/lib/constants";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function Testimonials() {
+  const { t } = useLanguage();
+  const localizedTestimonials = TESTIMONIALS.map((ts, i) => ({
+    ...ts,
+    quote: t(`site.testimonials.t${i + 1}Quote`),
+    detail: t(`site.testimonials.t${i + 1}Detail`),
+  }));
   const sectionRef = useRef<HTMLElement>(null);
   const startX = useRef<number | null>(null);
   const [index, setIndex] = useState(0);
-  const total = TESTIMONIALS.length;
-  const active = TESTIMONIALS[index];
+  const total = localizedTestimonials.length;
+  const active = localizedTestimonials[index];
 
   const go = (dir: number) => setIndex((i) => (i + dir + total) % total);
 
@@ -62,10 +69,10 @@ export function Testimonials() {
           <div>
             <p className="ts-head mb-8 flex items-center gap-3 text-[0.7rem] font-medium uppercase tracking-[0.32em] text-cream/45">
               <span className="h-px w-8 bg-gold" aria-hidden="true" />
-              Testimonials
+              {t("site.testimonials.eyebrow")}
             </p>
             <h2 className="ts-head max-w-2xl font-serif text-[2.5rem] font-medium leading-[1.02] tracking-[-0.02em] text-cream sm:text-5xl lg:text-6xl">
-              Trusted by <em className="italic text-cream/85">our patients.</em>
+              {t("site.testimonials.headingPrefix")} <em className="italic text-cream/85">{t("site.testimonials.headingSuffix")}</em>
             </h2>
           </div>
 
@@ -77,13 +84,13 @@ export function Testimonials() {
             </div>
             <div className="h-10 w-px bg-cream/15" aria-hidden="true" />
             <div>
-              <div className="flex gap-0.5 text-gold" aria-label="Rated 4.9 out of 5">
+              <div className="flex gap-0.5 text-gold" aria-label={t("site.testimonials.ratingAria")}>
                 {Array.from({ length: 5 }).map((_, i) => (
                   <Star key={i} className="h-4 w-4 fill-current" strokeWidth={0} aria-hidden="true" />
                 ))}
               </div>
               <p className="mt-1.5 text-xs uppercase tracking-[0.18em] text-cream/50">
-                {REVIEW_SUMMARY.count} Patient Reviews
+                {REVIEW_SUMMARY.count} {t("site.testimonials.patientReviews")}
               </p>
             </div>
           </div>
@@ -128,7 +135,7 @@ export function Testimonials() {
               <button
                 type="button"
                 onClick={() => go(-1)}
-                aria-label="Previous testimonial"
+                aria-label={t("site.testimonials.prev")}
                 className="grid h-12 w-12 place-items-center rounded-full border border-cream/20 text-cream transition-colors duration-300 hover:border-cream/60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold"
               >
                 <ArrowLeft className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
@@ -136,7 +143,7 @@ export function Testimonials() {
               <button
                 type="button"
                 onClick={() => go(1)}
-                aria-label="Next testimonial"
+                aria-label={t("site.testimonials.next")}
                 className="grid h-12 w-12 place-items-center rounded-full border border-cream/20 text-cream transition-colors duration-300 hover:border-cream/60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold"
               >
                 <ArrowRight className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
@@ -152,7 +159,7 @@ export function Testimonials() {
         </div>
 
         <p className="mt-12 text-[0.68rem] uppercase tracking-[0.18em] text-cream/30">
-          Fictional demo testimonials for presentation.
+          {t("site.testimonials.disclaimer")}
         </p>
       </div>
     </section>

@@ -1,6 +1,19 @@
+"use client";
+
 import { CLINIC, FOOTER_LINKS, SOCIAL_LINKS } from "@/lib/constants";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
+
+const FOOTER_LINK_KEYS: Record<string, string> = {
+  "#brand-statement": "site.nav.about",
+  "#treatments": "site.nav.treatments",
+  "#before-after": "site.nav.results",
+  "#doctor": "site.nav.doctor",
+  "#clinic-experience": "site.nav.clinic",
+  "#contact": "site.footer.contact",
+};
 
 export function Footer() {
+  const { t } = useLanguage();
   return (
     <footer className="relative w-full border-t border-cream/10 bg-ink px-6 py-16 text-cream md:px-10 md:py-20 lg:px-14">
       <div className="mx-auto max-w-[110rem]">
@@ -11,14 +24,14 @@ export function Footer() {
               Lumina <span className="text-gold">Dental</span>
             </p>
             <p className="mt-5 max-w-xs font-serif text-2xl font-medium leading-tight tracking-tight text-cream/80">
-              A healthier smile starts here.
+              {t("site.footer.tagline")}
             </p>
           </div>
 
           {/* Explore */}
           <nav aria-label="Footer">
             <p className="mb-5 text-[0.68rem] font-medium uppercase tracking-[0.2em] text-cream/40">
-              Explore
+              {t("site.footer.explore")}
             </p>
             <ul className="space-y-3">
               {FOOTER_LINKS.map((link) => (
@@ -27,7 +40,7 @@ export function Footer() {
                     href={link.href}
                     className="text-sm text-cream/70 transition-colors duration-300 hover:text-cream"
                   >
-                    {link.label}
+                    {FOOTER_LINK_KEYS[link.href] ? t(FOOTER_LINK_KEYS[link.href]) : link.label}
                   </a>
                 </li>
               ))}
@@ -37,7 +50,7 @@ export function Footer() {
           {/* Visit */}
           <div>
             <p className="mb-5 text-[0.68rem] font-medium uppercase tracking-[0.2em] text-cream/40">
-              Visit
+              {t("site.footer.visit")}
             </p>
             <address className="space-y-3 text-sm not-italic text-cream/70">
               <p>{CLINIC.address}</p>
@@ -57,7 +70,7 @@ export function Footer() {
           {/* Follow */}
           <div>
             <p className="mb-5 text-[0.68rem] font-medium uppercase tracking-[0.2em] text-cream/40">
-              Follow
+              {t("site.footer.follow")}
             </p>
             <ul className="space-y-3">
               {SOCIAL_LINKS.map((link) => (
@@ -77,9 +90,9 @@ export function Footer() {
         </div>
 
         <div className="mt-16 flex flex-col gap-3 border-t border-cream/10 pt-8 text-xs text-cream/40 sm:flex-row sm:items-center sm:justify-between">
-          <p>© 2026 Lumina Dental. All rights reserved.</p>
+          <p>{t("site.footer.rights")}</p>
           <p className="uppercase tracking-[0.18em]">
-            Demo project — not a real clinic.
+            {t("site.footer.demoNotice")}
           </p>
         </div>
       </div>

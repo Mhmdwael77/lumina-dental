@@ -5,8 +5,11 @@ import gsap, { ScrollTrigger } from "@/lib/gsap";
 import { Portrait } from "@/components/ui/Portrait";
 import { DOCTOR } from "@/lib/constants";
 import { prefersReducedMotion, useIsoLayoutEffect } from "@/lib/use-iso-layout-effect";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function Doctor() {
+  const { t } = useLanguage();
+  const credentials = [0, 1, 2, 3].map((i) => t(`site.doctor.credential${i}`));
   const sectionRef = useRef<HTMLElement>(null);
 
   useIsoLayoutEffect(() => {
@@ -75,11 +78,11 @@ export function Doctor() {
         <div className="order-2">
           <p className="dr-copy mb-8 flex items-center gap-3 text-[0.7rem] font-medium uppercase tracking-[0.32em] text-ink/50">
             <span className="h-px w-8 bg-gold" aria-hidden="true" />
-            The Dentist
+            {t("site.doctor.eyebrow")}
           </p>
 
           <h2 className="dr-copy font-serif text-[2.75rem] font-medium leading-[1.0] tracking-[-0.02em] text-ink sm:text-6xl lg:text-7xl">
-            Meet your <em className="italic text-ink/90">dentist.</em>
+            {t("site.doctor.headingPrefix")} <em className="italic text-ink/90">{t("site.doctor.headingSuffix")}</em>
           </h2>
 
           <div className="dr-copy mt-8">
@@ -93,7 +96,7 @@ export function Doctor() {
 
           {/* Credentials */}
           <ul className="dr-copy mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs font-medium uppercase tracking-[0.15em] text-ink/55">
-            {DOCTOR.credentials.map((c, i) => (
+            {credentials.map((c, i) => (
               <li key={c} className="flex items-center gap-5">
                 {i > 0 && (
                   <span className="h-3 w-px bg-ink/20" aria-hidden="true" />
@@ -105,11 +108,11 @@ export function Doctor() {
 
           {/* Quote */}
           <blockquote className="dr-copy mt-10 max-w-xl border-l-2 border-gold/50 pl-6 font-serif text-xl italic leading-relaxed text-ink/80 sm:text-2xl">
-            “{DOCTOR.quote}”
+            “{t("site.doctor.quote")}”
           </blockquote>
 
           <p className="dr-copy mt-10 text-[0.68rem] uppercase tracking-[0.18em] text-ink/35">
-            Demo profile for presentation — not a real practitioner.
+            {t("site.doctor.disclaimer")}
           </p>
         </div>
       </div>

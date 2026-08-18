@@ -113,11 +113,13 @@ By default the frontend talks to `http://127.0.0.1:8000`; override with `NEXT_PU
 work/
 ├─ frontend/                 # Next.js app
 │  ├─ app/
-│  │  ├─ admin/page.tsx      # staff/admin dashboard (single-page, client-rendered)
-│  │  ├─ booking/            # public booking flow
-│  │  └─ page.tsx            # marketing site
+│  │  ├─ admin/               # staff/admin dashboard (own layout.tsx — EN/AR + RTL)
+│  │  ├─ (site)/               # public marketing site + booking (EN/AR, LTR only)
+│  │  │  ├─ page.tsx
+│  │  │  └─ booking/
+│  │  └─ layout.tsx           # root layout — fonts, metadata, SmoothScroll
 │  ├─ components/            # 3D hero, sections, layout, providers (Lenis/GSAP)
-│  └─ lib/                   # API client (lib/api.ts), constants, animation helpers
+│  └─ lib/                   # API client (lib/api.ts), constants, i18n, animation helpers
 │
 └─ backend/                  # FastAPI service
    ├─ main.py                # app entrypoint, CORS, router registration
@@ -131,6 +133,37 @@ work/
    │  └─ dependencies.py     # get_db, require_staff, get_current_user
    └─ schemas/                # Pydantic request/response models
 ```
+
+---
+
+## ☁️ Deployment (Vercel + Railway)
+
+The frontend and backend deploy as two separate services against this same repo.
+
+### 1) Push to GitHub first
+Both platforms deploy from a GitHub repo — make sure your latest commits are pushed to `origin/main` before starting either import below.
+
+### 2) Backend → Railway
+1. On [railway.app](https://railway.app), **New Project → Deploy from GitHub repo** → pick this repo.
+2. In the service settings, set **Root Directory** to `backend`. Railway auto-detects Python via `requirements.txt` and uses `backend/Procfile` for the start command — no build config needed.
+3. Add these environment variables on the service:
+   | Variable | Value |
+   | --- | --- |
+   | `SECRET_KEY` | a long random string (**required** — don't ship the default) |
+   | `CORS_ORIGINS` | your Vercel URL once you have it, e.g. `https://your-app.vercel.app` |
+4. **Persist the database** — SQLite writes to a local file, which is wiped on every redeploy unless you attach storage. In the service → **Volumes**, add a volume mounted at `/app` (the working directory `database.db` is created in). Without this, the database resets on every deploy.
+5. Deploy, then copy the generated public URL (Settings → Networking → Generate Domain) — you'll need it for step 3 below.
+
+### 3) Frontend → Vercel
+1. On [vercel.com](https://vercel.com), **Add New → Project** → import the same GitHub repo.
+2. Set **Root Directory** to `frontend` in the import screen (or Project Settings → General afterward).
+3. Add an environment variable: `NEXT_PUBLIC_API_URL` = the Railway backend URL from step 2.5 above (no trailing slash).
+4. Deploy. Once it's live, go back to Railway and update `CORS_ORIGINS` to the real `https://your-app.vercel.app` domain Vercel just gave you, so the browser is actually allowed to call the API.
+
+### Notes
+- Redeploy the frontend after changing `NEXT_PUBLIC_API_URL` (Next.js inlines `NEXT_PUBLIC_*` vars at build time).
+- The admin dashboard falls back to `http://127.0.0.1:8000` if `NEXT_PUBLIC_API_URL` isn't set — you'll see "Demo Mode"-style broken requests if it's missing in production.
+- For a clinic handling real patient data, consider swapping SQLite for Railway's Postgres plugin (`DATABASE_URL` already reads from the environment) instead of relying on a volume.
 
 ---
 
