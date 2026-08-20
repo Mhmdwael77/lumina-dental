@@ -54,6 +54,7 @@ import {
 import { TREATMENT_OPTIONS, SERVICE_OPTIONS, CONSULTATION_SERVICE } from "@/lib/constants";
 import { useLanguage } from "@/lib/i18n/LanguageContext";
 import { LanguageToggle } from "@/components/ui/LanguageToggle";
+import { FinancialDashboard } from "@/components/admin/FinancialDashboard";
 
 /** A booking is a consultation when the backend tagged its service type. */
 const isConsultation = (b: Booking) => b.service_type === "consultation";
@@ -173,7 +174,7 @@ export default function AdminPage() {
 
   // Dashboard view mode: "agenda" (Day view), "table" (All bookings) or
   // "consultations" (only consultation requests, across all days).
-  const [viewMode, setViewMode] = useState<"agenda" | "table" | "consultations">("agenda");
+  const [viewMode, setViewMode] = useState<"agenda" | "table" | "consultations" | "financial">("agenda");
 
   // Selected Date for Agenda View (YYYY-MM-DD)
   const [selectedDate, setSelectedDate] = useState<string>(toLocalIso());
@@ -1105,6 +1106,17 @@ export default function AdminPage() {
                   </span>
                 )}
               </button>
+              <button
+                onClick={() => setViewMode("financial")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium uppercase tracking-[0.12em] transition-all ${
+                  viewMode === "financial"
+                    ? "bg-[#101820] text-[#f4f1eb] shadow"
+                    : "text-[#101820]/60 hover:text-[#101820]"
+                }`}
+              >
+                <Wallet className="w-3.5 h-3.5" />
+                <span>{t("admin.header.financial")}</span>
+              </button>
             </div>
 
             <LanguageToggle className="bg-white border border-[#101820]/10 shadow-sm text-[#101820]/70 hover:text-[#101820]" />
@@ -1163,7 +1175,8 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* Analytics Cards */}
+        {/* Analytics Cards (hidden on the Financial view — it has its own KPIs) */}
+        {viewMode !== "financial" && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white border border-[#101820]/10 rounded-2xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-2">
@@ -1217,6 +1230,10 @@ export default function AdminPage() {
             <p className="text-[0.7rem] text-blue-600/70 mt-1">{t("admin.stats.completedCaption")}</p>
           </div>
         </div>
+        )}
+
+        {/* ── FINANCIAL DASHBOARD VIEW ─────────────────────────────────────── */}
+        {viewMode === "financial" && <FinancialDashboard token={token || ""} onAuthError={handleLogout} />}
 
         {/* ── 3. AGENDA / DAY SCHEDULE VIEW (جدول اليوم والأيام) ──────────────── */}
         {viewMode === "agenda" && (

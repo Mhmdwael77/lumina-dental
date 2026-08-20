@@ -525,6 +525,23 @@ export default function BookingPage() {
             {/* ── STEP 3: PAYMENT METHOD ──────────────────────────────────────── */}
             {step === "payment" && (
               <div className="space-y-6">
+                {schedule && schedule.consultation_fee > 0 && (
+                  <div className="flex items-center justify-between gap-4 rounded-xl border border-gold/30 bg-gold/10 p-5">
+                    <div>
+                      <p className="text-[0.68rem] font-medium uppercase tracking-[0.2em] text-ink/50">
+                        {t("site.booking.amountToPay")}
+                      </p>
+                      <p className="mt-1 font-serif text-3xl font-medium text-ink">
+                        {schedule.consultation_fee.toLocaleString("en-US")}{" "}
+                        <span className="text-lg text-ink/60">{schedule.currency}</span>
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-ink/5 px-3 py-1 text-[0.65rem] font-medium text-ink/60">
+                      {t("site.booking.consultationFeeLabel")}
+                    </span>
+                  </div>
+                )}
+
                 <div>
                   <p className={labelBase}>{t("site.booking.howToPay")}</p>
                   <div className="mt-2 grid gap-4 sm:grid-cols-2">
@@ -605,7 +622,11 @@ export default function BookingPage() {
 
                 <div className="rounded-xl border border-ink/10 bg-cream/60 p-5">
                   <p className="text-[0.65rem] uppercase tracking-wider text-ink/40">{t("site.booking.amountDue")}</p>
-                  <p className="font-serif text-3xl font-medium text-ink">{t("site.booking.consultationFee")}</p>
+                  <p className="font-serif text-3xl font-medium text-ink">
+                    {confirmation.consultation_fee && confirmation.consultation_fee > 0
+                      ? `${confirmation.consultation_fee.toLocaleString("en-US")} ${schedule?.currency ?? "EGP"}`
+                      : t("site.booking.consultationFee")}
+                  </p>
                   <p className="mt-1 text-xs text-ink/50">
                     {t("site.booking.bookingQueueRef", { id: confirmation.id, number: confirmation.queue_number })}
                   </p>
@@ -673,6 +694,14 @@ export default function BookingPage() {
                     <span className="block text-[0.62rem] uppercase tracking-wider text-ink/40">{t("site.booking.queueNumber")}</span>
                     <span className="font-serif text-base font-medium text-gold">#{confirmation.queue_number}</span>
                   </div>
+                  {confirmation.consultation_fee != null && confirmation.consultation_fee > 0 && (
+                    <div>
+                      <span className="block text-[0.62rem] uppercase tracking-wider text-ink/40">{t("site.booking.consultationFeeLabel")}</span>
+                      <span className="font-serif text-base font-medium text-ink">
+                        {confirmation.consultation_fee.toLocaleString("en-US")} {schedule?.currency ?? "EGP"}
+                      </span>
+                    </div>
+                  )}
                   <div>
                     <span className="block text-[0.62rem] uppercase tracking-wider text-ink/40">{t("site.booking.patientsAhead")}</span>
                     <span className="font-serif text-base font-medium text-ink">{patientsAhead}</span>

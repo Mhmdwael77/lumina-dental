@@ -109,6 +109,10 @@ class Booking(Base):
     consultation_hint_dismissed = Column(Boolean, default=False, nullable=False)
 
     # ── Payment ───────────────────────────────────────────────────────────
+    # Base visit fee quoted to the patient at booking time — a snapshot of the
+    # clinic-wide consultation fee, so a later fee change never rewrites what an
+    # existing patient was told to pay. NULL on bookings made before a fee was set.
+    consultation_fee = Column(Float, nullable=True)
     payment_method = Column(SAEnum(PaymentMethod), default=PaymentMethod.CLINIC, nullable=False)
     payment_status = Column(SAEnum(PaymentStatus), default=PaymentStatus.PENDING, nullable=False)
 
@@ -135,6 +139,30 @@ class User(Base):
     username = Column(String(60), unique=True, nullable=False, index=True)
     hashed_password = Column(String(255), nullable=False)
     role = Column(SAEnum(UserRole), default=UserRole.STAFF, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class Setting(Base):
+    """Simple key/value store for clinic-wide settings (e.g. the base
+    consultation fee). Kept generic so new settings don't need a schema change."""
+    __tablename__ = "settings"
+
+    key = Column(String(60), primary_key=True)
+    value = Column(String(255), nullable=True)
+
+
+class Expense(Base):
+    """A clinic operating cost (rent, salaries, supplies, …). The only money
+    that isn't derived from bookings — revenue comes from paid extra charges on
+    bookings, expenses are entered here, and net profit is revenue − expenses."""
+    __tablename__ = "expenses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(120), nullable=False)
+    category = Column(String(60), nullable=False)
+    amount = Column(Float, nullable=False)
+    date = Column(String(20), nullable=False)          # e.g. "2026-08-20"
+    notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 

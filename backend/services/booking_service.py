@@ -28,6 +28,7 @@ from core.crud.booking import (
     get_bookings_by_phone as crud_get_by_phone,
     delete_booking as crud_delete,
 )
+from core.crud.setting import get_consultation_fee
 from core.database import Booking, BookingStatus, PaymentMethod, PaymentStatus, ServiceType
 from core.clinic_schedule import get_working_hours, is_working_day, is_within_working_hours
 from core.config import settings
@@ -216,6 +217,7 @@ def validate_and_create_booking(db: Session, data: BookingCreate) -> Booking:
         date=data.date,
         time=None,
         message=data.message,
+        consultation_fee=get_consultation_fee(db),
         payment_method=PaymentMethod(data.payment_method.value),
         payment_status=PaymentStatus.PENDING,
     )
@@ -234,6 +236,7 @@ def booking_to_public_response(db: Session, booking: Booking) -> dict:
         "patients_ahead": patients_ahead,
         "estimated_arrival_start": booking.estimated_arrival_start,
         "estimated_arrival_end": booking.estimated_arrival_end,
+        "consultation_fee": booking.consultation_fee,
         "payment_method": booking.payment_method,
         "payment_status": booking.payment_status,
     }

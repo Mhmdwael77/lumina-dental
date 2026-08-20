@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import settings
 from core.database import init_db
-from routers import booking, auth, clinic
+from routers import booking, auth, clinic, finance
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -55,6 +55,7 @@ app.add_middleware(
 app.include_router(booking.router)
 app.include_router(auth.router)
 app.include_router(clinic.router)
+app.include_router(finance.router)
 
 
 # ── Health check ──────────────────────────────────────────────────────────────

@@ -74,6 +74,13 @@ class ConsultationHintUpdate(BaseModel):
     dismissed: bool
 
 
+class ConsultationFeeUpdate(BaseModel):
+    """Staff set the clinic-wide base consultation fee shown to patients at
+    booking. Applies to bookings made after it's set (existing ones keep the
+    fee they were quoted)."""
+    fee: float = Field(..., ge=0, examples=[200.0])
+
+
 class ExtraChargeUpdate(BaseModel):
     """Staff-entered extra charge on top of the base appointment — e.g. a
     crown/filling/add-on done during or after the exam."""
@@ -114,6 +121,7 @@ class BookingResponse(BaseModel):
     arrived_at: Optional[datetime] = None
     consultation_hint_dismissed: bool = False
 
+    consultation_fee: Optional[float] = None
     payment_method: PaymentMethodEnum
     payment_status: PaymentStatusEnum
     reminder_status: ReminderStatusEnum
@@ -144,6 +152,7 @@ class BookingPublicResponse(BaseModel):
     estimated_arrival_start: Optional[datetime] = None
     estimated_arrival_end: Optional[datetime] = None
 
+    consultation_fee: Optional[float] = None
     payment_method: PaymentMethodEnum
     payment_status: PaymentStatusEnum
 
@@ -184,3 +193,5 @@ class ClinicScheduleResponse(BaseModel):
     min_consultation_minutes: int
     max_consultation_minutes: int
     booking_window_days: int
+    consultation_fee: float = 0.0
+    currency: str = "EGP"

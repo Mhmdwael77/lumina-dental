@@ -34,6 +34,7 @@ export interface Booking {
   extra_charge_amount?: number | null;
   extra_charge_description?: string | null;
   extra_charge_paid?: boolean;
+  consultation_fee?: number | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -50,6 +51,7 @@ export interface BookingConfirmation {
   patients_ahead: number;
   estimated_arrival_start?: string | null;
   estimated_arrival_end?: string | null;
+  consultation_fee?: number | null;
   payment_method: PaymentMethod;
   payment_status: PaymentStatus;
 }
@@ -84,6 +86,8 @@ export interface ClinicSchedule {
   min_consultation_minutes: number;
   max_consultation_minutes: number;
   booking_window_days: number;
+  consultation_fee: number;
+  currency: string;
 }
 
 export interface BookingCreateData {
@@ -394,6 +398,128 @@ export async function updateExtraCharge(
   });
   if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not save the extra charge."), res.status);
   return res.json();
+}
+
+// ── Finance / Expenses ────────────────────────────────────────────────────────
+export interface Expense {
+  id: number;
+  name: string;
+  category: string;
+  amount: number;
+  date: string;
+  notes?: string | null;
+  created_at?: string;
+}
+
+export interface ExpenseCreateData {
+  name: string;
+  category: string;
+  amount: number;
+  date: string;
+  notes?: string;
+}
+
+export interface FinanceSummary {
+  currency: string;
+  kpis: {
+    today_patients: number;
+    today_appointments: number;
+    today_revenue: number;
+    week_revenue: number;
+    month_revenue: number;
+    total_revenue: number;
+    pending_payments: number;
+    total_expenses: number;
+    net_profit: number;
+    avg_revenue_per_patient: number;
+    cancelled_appointments: number;
+  };
+  range: {
+    start: string;
+    end: string;
+    revenue: number;
+    expenses: number;
+    net_profit: number;
+    pending: number;
+    appointments: number;
+    patients: number;
+    cancelled: number;
+  };
+  revenue_series: { label: string; revenue: number; expenses: number }[];
+  appointments_series: { label: string; appointments: number; patients: number }[];
+  payments_breakdown: { paid: number; pending: number };
+  expenses_by_category: { category: string; amount: number }[];
+  recent_transactions: {
+    id: string;
+    kind: "revenue" | "expense";
+    date: string;
+    title: string;
+    subtitle?: string | null;
+    amount: number;
+    status: string;
+  }[];
+}
+
+/** Financial dashboard summary for a date range (all figures from the real DB). */
+export async function fetchFinanceSummary(
+  token: string,
+  start: string,
+  end: string
+): Promise<FinanceSummary> {
+  const res = await fetch(
+    `${API_BASE_URL}/finance/summary?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
+    { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }
+  );
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not load financial summary."), res.status);
+  return res.json();
+}
+
+/** List expenses, optionally within a date range. */
+export async function fetchExpenses(token: string, start?: string, end?: string): Promise<Expense[]> {
+  const qs = new URLSearchParams();
+  if (start) qs.set("start", start);
+  if (end) qs.set("end", end);
+  const res = await fetch(`${API_BASE_URL}/finance/expenses?${qs.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not load expenses."), res.status);
+  return res.json();
+}
+
+/** Add an expense. */
+export async function createExpense(token: string, data: ExpenseCreateData): Promise<Expense> {
+  const res = await fetch(`${API_BASE_URL}/finance/expenses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not save the expense."), res.status);
+  return res.json();
+}
+
+/** Set the clinic-wide base consultation fee (staff). */
+export async function updateConsultationFee(
+  token: string,
+  fee: number
+): Promise<{ consultation_fee: number; currency: string }> {
+  const res = await fetch(`${API_BASE_URL}/clinic/consultation-fee`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ fee }),
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not update the consultation fee."), res.status);
+  return res.json();
+}
+
+/** Delete an expense. */
+export async function deleteExpense(token: string, expenseId: number): Promise<boolean> {
+  const res = await fetch(`${API_BASE_URL}/finance/expenses/${expenseId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not delete the expense."), res.status);
+  return true;
 }
 
 /** Delete a booking */
