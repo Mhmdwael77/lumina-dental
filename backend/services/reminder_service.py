@@ -66,13 +66,13 @@ def dispatch_due_reminders(db: Session, today: date | None = None) -> dict:
         if booking.queue_number is None:
             continue
 
-        patients_ahead = count_patients_ahead(db, date_str, booking.queue_number)
+        patients_ahead = count_patients_ahead(db, date_str, booking.queue_number, booking.branch_id)
         minutes_until_turn = patients_ahead * settings.MIN_CONSULTATION_MINUTES
 
         if minutes_until_turn > settings.REMINDER_LEAD_MINUTES:
             continue
 
-        serving = get_currently_serving(db, date_str)
+        serving = get_currently_serving(db, date_str, booking.branch_id)
         message = _build_message(booking, patients_ahead, serving.queue_number if serving else None)
 
         ok = send_whatsapp_message(booking.phone, message)

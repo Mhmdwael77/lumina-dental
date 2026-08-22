@@ -195,6 +195,7 @@ export default function AdminPage() {
   // which branch they're logging in for.
   const [userRole, setUserRole] = useState<string | null>(null);
   const [branchName, setBranchName] = useState<string | null>(null);
+  const [currentUserBranchId, setCurrentUserBranchId] = useState<number | null>(null);
   const isAdmin = userRole === "admin";
 
   // Admin-only branch switcher for Day Agenda / All Bookings / Consultations
@@ -343,16 +344,19 @@ export default function AdminPage() {
     if (!token) {
       setUserRole(null);
       setBranchName(null);
+      setCurrentUserBranchId(null);
       return;
     }
     fetchCurrentUser(token)
       .then((user) => {
         setUserRole(user.role);
         setBranchName(user.branch_name ?? null);
+        setCurrentUserBranchId(user.branch_id ?? null);
       })
       .catch(() => {
         setUserRole(null);
         setBranchName(null);
+        setCurrentUserBranchId(null);
       });
   }, [token]);
 
@@ -510,6 +514,11 @@ export default function AdminPage() {
     setIsSubmittingNew(true);
     setNewFormError("");
     try {
+      // Stamp the walk-in with a branch up front — staff are locked to their
+      // own branch's bookings server-side, so a walk-in created without one
+      // would silently vanish from their own list right after "succeeding".
+      // Admin gets whichever branch they're currently filtered to, if any.
+      const walkInBranchId = !isAdmin ? currentUserBranchId : branchFilter ? Number(branchFilter) : undefined;
       await submitBooking({
         full_name: newForm.full_name,
         phone: newForm.phone,
@@ -519,6 +528,7 @@ export default function AdminPage() {
         date: newForm.date,
         message: newForm.message || undefined,
         payment_method: "clinic",
+        branch_id: walkInBranchId ?? undefined,
       });
 
       // Refetch instead of appending: the public booking endpoint only

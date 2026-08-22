@@ -64,22 +64,28 @@ def get_bookings_by_phone(db: Session, phone: str) -> list[Booking]:
 MAX_QUEUE_ASSIGN_ATTEMPTS = 8
 
 
-def count_active_bookings_for_date(db: Session, date: str) -> int:
+def count_active_bookings_for_date(db: Session, date: str, branch_id: int | None = None) -> int:
+    """Each branch runs its own queue for the day, so this only counts
+    bookings at `branch_id` (or, if None, bookings with no branch at all —
+    `Booking.branch_id == None` compiles to `IS NULL`, which is exactly what
+    we want here)."""
     return (
         db.query(func.count(Booking.id))
-        .filter(Booking.date == date, Booking.status.in_(ACTIVE_STATUSES))
+        .filter(Booking.date == date, Booking.branch_id == branch_id, Booking.status.in_(ACTIVE_STATUSES))
         .scalar()
         or 0
     )
 
 
-def count_patients_ahead(db: Session, date: str, queue_number: int) -> int:
-    """How many bookings before `queue_number` on `date` still haven't been
-    served or cancelled — i.e. actually still ahead in line right now."""
+def count_patients_ahead(db: Session, date: str, queue_number: int, branch_id: int | None = None) -> int:
+    """How many bookings before `queue_number` on `date`, at the same branch,
+    still haven't been served or cancelled — i.e. actually still ahead in
+    line right now."""
     return (
         db.query(func.count(Booking.id))
         .filter(
             Booking.date == date,
+            Booking.branch_id == branch_id,
             Booking.queue_number < queue_number,
             Booking.status.in_(STILL_WAITING_STATUSES),
         )
@@ -88,13 +94,15 @@ def count_patients_ahead(db: Session, date: str, queue_number: int) -> int:
     )
 
 
-def get_currently_serving(db: Session, date: str) -> Booking | None:
-    """The lowest-queue-number booking that has arrived and not yet been
-    completed or cancelled — i.e. whoever is in the chair right now."""
+def get_currently_serving(db: Session, date: str, branch_id: int | None = None) -> Booking | None:
+    """The lowest-queue-number booking at this branch that has arrived and
+    not yet been completed or cancelled — i.e. whoever is in the chair
+    right now, at that branch."""
     return (
         db.query(Booking)
         .filter(
             Booking.date == date,
+            Booking.branch_id == branch_id,
             Booking.status.in_(STILL_WAITING_STATUSES),
             Booking.patient_arrived.is_(True),
         )
@@ -104,23 +112,27 @@ def get_currently_serving(db: Session, date: str) -> Booking | None:
 
 
 def create_booking_with_queue_number(db: Session, estimate_fn, **kwargs) -> Booking:
-    """Assign the next queue number for `date` and persist the booking.
+    """Assign the next queue number for `date` at this branch and persist
+    the booking — each branch runs its own queue, so "first booking of the
+    day" at every branch is #1.
 
-    Two patients booking at the same moment could both read the same
-    "current max" queue number before either commits. We guard against that
-    with a retry-on-conflict loop backed by the DB-level unique constraint
-    on (date, queue_number) — whichever request commits first wins that
-    number, the loser recomputes the next number and retries.
+    Two patients booking at the same moment (at the same branch) could both
+    read the same "current max" queue number before either commits. We
+    guard against that with a retry-on-conflict loop backed by the DB-level
+    unique constraint on (date, branch_id, queue_number) — whichever
+    request commits first wins that number, the loser recomputes the next
+    number and retries.
 
     `estimate_fn(patients_ahead) -> (start, end)` is recomputed on every
     attempt so the stored estimate always matches the queue number that
     actually ends up persisted, even if a race forced a retry.
     """
     date = kwargs["date"]
+    branch_id = kwargs.get("branch_id")
     last_error: Exception | None = None
 
     for _ in range(MAX_QUEUE_ASSIGN_ATTEMPTS):
-        patients_ahead = count_active_bookings_for_date(db, date)
+        patients_ahead = count_active_bookings_for_date(db, date, branch_id)
         next_number = patients_ahead + 1
         estimated_start, estimated_end = estimate_fn(patients_ahead)
         booking = Booking(

@@ -76,12 +76,14 @@ class ReminderStatus(str, enum.Enum):
 # ── Models ────────────────────────────────────────────────────────────────────
 class Booking(Base):
     __tablename__ = "bookings"
-    # Note: only enforced by the DB on a freshly created table — SQLite can't
-    # ALTER a table to add a composite UNIQUE constraint, so on an upgraded
-    # existing database.db this is a no-op and uniqueness relies solely on
-    # the retry-on-conflict assignment loop in core/crud/booking.py.
+    # Queue numbers are scoped per branch (each branch runs its own queue for
+    # the day), so the uniqueness constraint has to include branch_id too —
+    # otherwise two different branches' "first booking of the day" would both
+    # claim queue_number=1 and collide. See _migrate_booking_queue_constraint()
+    # for how an existing database.db gets upgraded to this (SQLite can't
+    # ALTER a table to change a composite UNIQUE constraint in place).
     __table_args__ = (
-        UniqueConstraint("date", "queue_number", name="uq_booking_date_queue"),
+        UniqueConstraint("date", "branch_id", "queue_number", name="uq_booking_date_branch_queue"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -311,6 +313,7 @@ def init_db() -> None:
     requiring a dropped/recreated database.db)."""
     Base.metadata.create_all(bind=engine)
     _migrate_missing_columns()
+    _migrate_booking_queue_constraint()
     _migrate_legacy_medical_record_fields()
     _seed_default_users()
 
@@ -364,6 +367,32 @@ def _migrate_missing_columns() -> None:
                 conn.execute(
                     text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {col_type}{default_clause}')
                 )
+
+
+def _migrate_booking_queue_constraint() -> None:
+    """One-time upgrade: queue numbers used to be unique per date across the
+    whole clinic; now each branch runs its own queue, so the constraint has
+    to be UNIQUE(date, branch_id, queue_number) instead — otherwise two
+    branches' "first booking of the day" would both claim queue_number=1 and
+    collide. SQLite can't ALTER a table to change a composite UNIQUE
+    constraint in place, so this renames the old table aside, lets
+    create_all's fresh CREATE TABLE (with the new constraint) take its place,
+    copies every row over, then drops the old one."""
+    inspector = inspect(engine)
+    if "bookings" not in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        existing_sql = conn.execute(
+            text("SELECT sql FROM sqlite_master WHERE type='table' AND name='bookings'")
+        ).scalar()
+        if not existing_sql or "uq_booking_date_branch_queue" in existing_sql:
+            return  # already migrated
+
+        conn.execute(text("ALTER TABLE bookings RENAME TO bookings_old_uq_migration"))
+        Booking.__table__.create(bind=conn)
+        columns = ", ".join(f'"{c.name}"' for c in Booking.__table__.columns)
+        conn.execute(text(f"INSERT INTO bookings ({columns}) SELECT {columns} FROM bookings_old_uq_migration"))
+        conn.execute(text("DROP TABLE bookings_old_uq_migration"))
 
 
 def _migrate_legacy_medical_record_fields() -> None:

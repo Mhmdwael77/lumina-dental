@@ -129,7 +129,7 @@ def get_availability(db: Session, date_str: str, branch_id: int | None = None):
             "reason": f"Bookings can only be made up to {settings.BOOKING_WINDOW_DAYS} days in advance.",
         }
 
-    patients_booked = count_active_bookings_for_date(db, date_str)
+    patients_booked = count_active_bookings_for_date(db, date_str, branch_id)
     return {
         "date": date_str,
         "is_working_day": True,
@@ -216,7 +216,7 @@ def validate_and_create_booking(db: Session, data: BookingCreate) -> Booking:
     hours = get_working_hours(booking_date, schedule)
     close_dt = datetime.combine(booking_date, hours[1])
     now = datetime.now()
-    projected_ahead = count_active_bookings_for_date(db, data.date)
+    projected_ahead = count_active_bookings_for_date(db, data.date, data.branch_id)
     projected_start, _ = _estimate_window(booking_date, projected_ahead, now, schedule)
     if projected_start >= close_dt:
         raise HTTPException(
@@ -252,7 +252,7 @@ def validate_and_create_booking(db: Session, data: BookingCreate) -> Booking:
 
 
 def booking_to_public_response(db: Session, booking: Booking) -> dict:
-    patients_ahead = count_patients_ahead(db, booking.date, booking.queue_number)
+    patients_ahead = count_patients_ahead(db, booking.date, booking.queue_number, booking.branch_id)
     return {
         "id": booking.id,
         "full_name": booking.full_name,
@@ -276,8 +276,8 @@ def get_queue_status(db: Session, booking_id: int) -> dict:
     if booking is None or booking.queue_number is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
-    patients_ahead = count_patients_ahead(db, booking.date, booking.queue_number)
-    serving = get_currently_serving(db, booking.date)
+    patients_ahead = count_patients_ahead(db, booking.date, booking.queue_number, booking.branch_id)
+    serving = get_currently_serving(db, booking.date, booking.branch_id)
 
     return {
         "id": booking.id,
