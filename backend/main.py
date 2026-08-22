@@ -7,13 +7,15 @@ Run with:
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from core.config import settings
 from core.database import init_db
-from routers import booking, auth, clinic, finance
+from routers import booking, auth, clinic, finance, medical_records
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -56,6 +58,12 @@ app.include_router(booking.router)
 app.include_router(auth.router)
 app.include_router(clinic.router)
 app.include_router(finance.router)
+app.include_router(medical_records.router)
+
+# Serve uploaded medical images. Local single-clinic app, so these are served
+# statically (no per-file auth) — the whole backend runs on 127.0.0.1.
+Path("uploads/medical").mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 
 # ── Health check ──────────────────────────────────────────────────────────────

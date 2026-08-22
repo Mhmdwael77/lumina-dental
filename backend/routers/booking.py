@@ -29,6 +29,7 @@ from schemas.booking import (
     ArrivalUpdate,
     ConsultationHintUpdate,
     ExtraChargeUpdate,
+    MedicalRecordUpdate,
     PaymentConfirmRequest,
 )
 from services.booking_service import (
@@ -39,6 +40,7 @@ from services.booking_service import (
     mark_arrival,
     set_consultation_hint,
     set_extra_charge,
+    set_medical_record,
     list_bookings,
     get_single_booking,
     get_patient_bookings,
@@ -177,6 +179,20 @@ def update_extra_charge(
     _: User = Depends(require_staff),
 ):
     return set_extra_charge(db, booking_id, body)
+
+
+@router.patch(
+    "/{booking_id}/medical-record",
+    response_model=BookingResponse,
+    summary="Save the clinical record (diagnosis, prescription, …) for a visit (staff)",
+)
+def update_medical_record(
+    booking_id: int,
+    body: MedicalRecordUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_staff),
+):
+    return set_medical_record(db, booking_id, body)
 
 
 @router.post(

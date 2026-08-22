@@ -11,12 +11,13 @@ from sqlalchemy import (
     Text,
     Boolean,
     Float,
+    ForeignKey,
     UniqueConstraint,
     Enum as SAEnum,
     inspect,
     text,
 )
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from datetime import datetime, timezone
 import enum
 
@@ -123,6 +124,14 @@ class Booking(Base):
     extra_charge_description = Column(String(200), nullable=True)
     extra_charge_paid = Column(Boolean, default=False, nullable=False)
 
+    # ── Clinical record (the doctor fills this in during / after the visit) ──
+    diagnosis = Column(Text, nullable=True)
+    prescription = Column(Text, nullable=True)
+    follow_up_needed = Column(Boolean, default=False, nullable=False)
+    follow_up_notes = Column(String(255), nullable=True)      # when / why to follow up
+    chronic_conditions = Column(Text, nullable=True)          # patient's ongoing conditions
+    current_medications = Column(Text, nullable=True)         # meds the patient already takes
+
     # ── WhatsApp reminder ────────────────────────────────────────────────
     reminder_status = Column(SAEnum(ReminderStatus), default=ReminderStatus.PENDING, nullable=False)
     reminder_sent_at = Column(DateTime, nullable=True)
@@ -164,6 +173,54 @@ class Expense(Base):
     date = Column(String(20), nullable=False)          # e.g. "2026-08-20"
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class MedicalRecord(Base):
+    """A standalone patient medical file — not tied to a booking, so records can
+    be kept for walk-ins or anyone. Holds the clinical notes plus attached
+    images (X-rays / photos)."""
+    __tablename__ = "medical_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_name = Column(String(120), nullable=False)
+    gender = Column(String(20), nullable=True)          # male / female / other
+    age = Column(Integer, nullable=True)
+    phone = Column(String(30), nullable=True)
+    diagnosis = Column(Text, nullable=True)
+    prescription = Column(Text, nullable=True)
+    follow_up_needed = Column(Boolean, default=False, nullable=False)
+    follow_up_notes = Column(String(255), nullable=True)
+    chronic_conditions = Column(Text, nullable=True)
+    current_medications = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+    images = relationship(
+        "MedicalImage", back_populates="record", cascade="all, delete-orphan",
+        order_by="MedicalImage.id",
+    )
+
+
+class MedicalImage(Base):
+    """An image (X-ray / photo) attached to a medical record. The file lives on
+    disk under the uploads dir; this row keeps the reference + metadata."""
+    __tablename__ = "medical_images"
+
+    id = Column(Integer, primary_key=True, index=True)
+    record_id = Column(Integer, ForeignKey("medical_records.id", ondelete="CASCADE"), nullable=False, index=True)
+    filename = Column(String(255), nullable=False)      # stored name on disk
+    original_name = Column(String(255), nullable=True)
+    content_type = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    record = relationship("MedicalRecord", back_populates="images")
+
+    @property
+    def url(self) -> str:
+        """Path the frontend appends to the API base to load the image."""
+        return f"/uploads/medical/{self.filename}"
 
 
 # ── Create tables ─────────────────────────────────────────────────────────────
@@ -210,7 +267,7 @@ def _migrate_missing_columns() -> None:
                     continue
                 col_type = column.type.compile(dialect=engine.dialect)
                 default_clause = ""
-                if column.name in ("patient_arrived", "consultation_hint_dismissed", "extra_charge_paid"):
+                if column.name in ("patient_arrived", "consultation_hint_dismissed", "extra_charge_paid", "follow_up_needed"):
                     default_clause = " DEFAULT 0"
                 elif column.name == "service_type":
                     # SAEnum stores the member NAME (e.g. existing rows hold

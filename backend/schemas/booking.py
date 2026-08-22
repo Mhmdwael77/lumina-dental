@@ -89,6 +89,18 @@ class ExtraChargeUpdate(BaseModel):
     paid: bool = False
 
 
+class MedicalRecordUpdate(BaseModel):
+    """The clinical notes the doctor records for a visit: diagnosis,
+    prescription, whether a follow-up is needed, chronic conditions and any
+    medications the patient already takes."""
+    diagnosis: Optional[str] = Field(None, max_length=2000)
+    prescription: Optional[str] = Field(None, max_length=2000)
+    follow_up_needed: bool = False
+    follow_up_notes: Optional[str] = Field(None, max_length=255)
+    chronic_conditions: Optional[str] = Field(None, max_length=2000)
+    current_medications: Optional[str] = Field(None, max_length=2000)
+
+
 class PaymentConfirmRequest(BaseModel):
     """Simulated online-payment confirmation.
 
@@ -129,6 +141,13 @@ class BookingResponse(BaseModel):
     extra_charge_amount: Optional[float] = None
     extra_charge_description: Optional[str] = None
     extra_charge_paid: bool = False
+
+    diagnosis: Optional[str] = None
+    prescription: Optional[str] = None
+    follow_up_needed: bool = False
+    follow_up_notes: Optional[str] = None
+    chronic_conditions: Optional[str] = None
+    current_medications: Optional[str] = None
 
     created_at: datetime
     updated_at: datetime

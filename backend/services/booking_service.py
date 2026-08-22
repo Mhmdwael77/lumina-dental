@@ -25,6 +25,7 @@ from core.crud.booking import (
     set_consultation_hint_dismissed as crud_set_hint,
     set_payment_paid as crud_set_payment_paid,
     set_extra_charge as crud_set_extra_charge,
+    set_medical_record as crud_set_medical_record,
     get_bookings_by_phone as crud_get_by_phone,
     delete_booking as crud_delete,
 )
@@ -32,7 +33,7 @@ from core.crud.setting import get_consultation_fee
 from core.database import Booking, BookingStatus, PaymentMethod, PaymentStatus, ServiceType
 from core.clinic_schedule import get_working_hours, is_working_day, is_within_working_hours
 from core.config import settings
-from schemas.booking import BookingCreate, BookingStatusUpdate, ExtraChargeUpdate, ServiceTypeEnum
+from schemas.booking import BookingCreate, BookingStatusUpdate, ExtraChargeUpdate, MedicalRecordUpdate, ServiceTypeEnum
 
 # Treatments must match the frontend constants
 VALID_TREATMENTS = {
@@ -332,6 +333,29 @@ def change_booking_status(db: Session, booking_id: int, update: BookingStatusUpd
 
 def set_extra_charge(db: Session, booking_id: int, update: ExtraChargeUpdate) -> Booking:
     booking = crud_set_extra_charge(db, booking_id, update.amount, update.description, update.paid)
+    if booking is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+    return booking
+
+
+def _clean(value: str | None) -> str | None:
+    if value is None:
+        return None
+    trimmed = value.strip()
+    return trimmed or None
+
+
+def set_medical_record(db: Session, booking_id: int, update: MedicalRecordUpdate) -> Booking:
+    booking = crud_set_medical_record(
+        db,
+        booking_id,
+        diagnosis=_clean(update.diagnosis),
+        prescription=_clean(update.prescription),
+        follow_up_needed=update.follow_up_needed,
+        follow_up_notes=_clean(update.follow_up_notes),
+        chronic_conditions=_clean(update.chronic_conditions),
+        current_medications=_clean(update.current_medications),
+    )
     if booking is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
     return booking

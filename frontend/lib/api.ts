@@ -35,8 +35,23 @@ export interface Booking {
   extra_charge_description?: string | null;
   extra_charge_paid?: boolean;
   consultation_fee?: number | null;
+  diagnosis?: string | null;
+  prescription?: string | null;
+  follow_up_needed?: boolean;
+  follow_up_notes?: string | null;
+  chronic_conditions?: string | null;
+  current_medications?: string | null;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface MedicalRecordData {
+  diagnosis?: string;
+  prescription?: string;
+  follow_up_needed: boolean;
+  follow_up_notes?: string;
+  chronic_conditions?: string;
+  current_medications?: string;
 }
 
 /** Reduced confirmation returned by the public booking endpoint. */
@@ -519,6 +534,129 @@ export async function deleteExpense(token: string, expenseId: number): Promise<b
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not delete the expense."), res.status);
+  return true;
+}
+
+/**
+ * Save the clinical record (diagnosis, prescription, follow-up, chronic
+ * conditions, current medications) the doctor records for a visit.
+ */
+export async function updateMedicalRecord(
+  token: string,
+  bookingId: number,
+  data: MedicalRecordData
+): Promise<Booking> {
+  const res = await fetch(`${API_BASE_URL}/bookings/${bookingId}/medical-record`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not save the medical record."), res.status);
+  return res.json();
+}
+
+// ── Standalone medical records (a patient file, not tied to a booking) ────────
+export interface MedicalImage {
+  id: number;
+  filename: string;
+  original_name?: string | null;
+  content_type?: string | null;
+  url: string;
+  created_at?: string;
+}
+
+export interface MedicalRecord {
+  id: number;
+  patient_name: string;
+  gender?: string | null;
+  age?: number | null;
+  phone?: string | null;
+  diagnosis?: string | null;
+  prescription?: string | null;
+  follow_up_needed: boolean;
+  follow_up_notes?: string | null;
+  chronic_conditions?: string | null;
+  current_medications?: string | null;
+  notes?: string | null;
+  images: MedicalImage[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface MedicalRecordInput {
+  patient_name: string;
+  gender?: string;
+  age?: number | null;
+  phone?: string;
+  diagnosis?: string;
+  prescription?: string;
+  follow_up_needed: boolean;
+  follow_up_notes?: string;
+  chronic_conditions?: string;
+  current_medications?: string;
+  notes?: string;
+}
+
+/** Absolute URL for an uploaded image path returned by the API. */
+export const mediaUrl = (path: string) => `${API_BASE_URL}${path}`;
+
+export async function listMedicalRecords(token: string, search?: string): Promise<MedicalRecord[]> {
+  const qs = search ? `?search=${encodeURIComponent(search)}` : "";
+  const res = await fetch(`${API_BASE_URL}/medical-records${qs}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not load medical records."), res.status);
+  return res.json();
+}
+
+export async function createMedicalRecord(token: string, data: MedicalRecordInput): Promise<MedicalRecord> {
+  const res = await fetch(`${API_BASE_URL}/medical-records`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not create the record."), res.status);
+  return res.json();
+}
+
+export async function editMedicalRecord(token: string, id: number, data: MedicalRecordInput): Promise<MedicalRecord> {
+  const res = await fetch(`${API_BASE_URL}/medical-records/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not save the record."), res.status);
+  return res.json();
+}
+
+export async function deleteMedicalRecord(token: string, id: number): Promise<boolean> {
+  const res = await fetch(`${API_BASE_URL}/medical-records/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not delete the record."), res.status);
+  return true;
+}
+
+export async function uploadMedicalImage(token: string, recordId: number, file: File): Promise<MedicalImage> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE_URL}/medical-records/${recordId}/images`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` }, // no Content-Type: browser sets the multipart boundary
+    body: form,
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not upload the image."), res.status);
+  return res.json();
+}
+
+export async function deleteMedicalImage(token: string, imageId: number): Promise<boolean> {
+  const res = await fetch(`${API_BASE_URL}/medical-records/images/${imageId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not delete the image."), res.status);
   return true;
 }
 

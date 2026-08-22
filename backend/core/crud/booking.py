@@ -227,6 +227,31 @@ def set_extra_charge(
     return booking
 
 
+def set_medical_record(
+    db: Session,
+    booking_id: int,
+    *,
+    diagnosis: str | None,
+    prescription: str | None,
+    follow_up_needed: bool,
+    follow_up_notes: str | None,
+    chronic_conditions: str | None,
+    current_medications: str | None,
+) -> Booking | None:
+    booking = get_booking(db, booking_id)
+    if booking is None:
+        return None
+    booking.diagnosis = diagnosis
+    booking.prescription = prescription
+    booking.follow_up_needed = follow_up_needed
+    booking.follow_up_notes = follow_up_notes
+    booking.chronic_conditions = chronic_conditions
+    booking.current_medications = current_medications
+    db.commit()
+    db.refresh(booking)
+    return booking
+
+
 def delete_booking(db: Session, booking_id: int) -> bool:
     booking = get_booking(db, booking_id)
     if booking is None:

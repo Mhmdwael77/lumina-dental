@@ -36,3 +36,6 @@ next-env.d.ts
 # SQLite runtime databases hold live patient data — never commit them.
 *.db
 *.sqlite3
+# Uploaded medical images (patient data) — never commit.
+backend/uploads/
+uploads/
