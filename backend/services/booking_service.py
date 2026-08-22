@@ -30,8 +30,9 @@ from core.crud.booking import (
     delete_booking as crud_delete,
 )
 from core.crud.setting import get_consultation_fee
-from core.database import Booking, BookingStatus, PaymentMethod, PaymentStatus, ServiceType
-from core.clinic_schedule import get_working_hours, is_working_day, is_within_working_hours
+from core.crud.branch import get_branch
+from core.database import Booking, BookingStatus, PaymentMethod, PaymentStatus, ServiceType, User
+from core.clinic_schedule import get_working_hours, is_working_day, is_within_working_hours, branch_working_hours
 from core.config import settings
 from schemas.booking import BookingCreate, BookingStatusUpdate, ExtraChargeUpdate, MedicalRecordUpdate, ServiceTypeEnum
 
@@ -62,14 +63,18 @@ def _parse_date(raw: str) -> date:
         )
 
 
-def _estimate_window(booking_date: date, patients_ahead: int, now: datetime | None = None):
+def _estimate_window(booking_date: date, patients_ahead: int, now: datetime | None = None, schedule=None):
     """(start, end) estimate for reaching the front of the queue.
 
     Baselines off clinic opening time, except for same-day bookings made
     after opening — those baseline off "now" so the estimate reflects
     today's actual queue progress instead of a time that's already passed.
+
+    `schedule` scopes this to one branch's working hours (see
+    core/clinic_schedule.py's branch_working_hours()); omit it for the
+    clinic-wide default.
     """
-    hours = get_working_hours(booking_date)
+    hours = get_working_hours(booking_date, schedule)
     if hours is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -85,9 +90,10 @@ def _estimate_window(booking_date: date, patients_ahead: int, now: datetime | No
     return start, end
 
 
-def get_availability(db: Session, date_str: str):
+def get_availability(db: Session, date_str: str, branch_id: int | None = None):
     booking_date = _parse_date(date_str)
-    hours = get_working_hours(booking_date)
+    schedule = branch_working_hours(get_branch(db, branch_id)) if branch_id is not None else None
+    hours = get_working_hours(booking_date, schedule)
     today = date.today()
 
     if hours is None:
@@ -170,6 +176,20 @@ def validate_and_create_booking(db: Session, data: BookingCreate) -> Booking:
         treatment_value = data.treatment
         service_type = ServiceType.TREATMENT
 
+    # A branch picked at booking time is stamped straight onto the booking —
+    # its own working days/hours (if it's set any) gate which dates can be
+    # picked, and its exam fee (or, for a consultation, its consultation
+    # price) replaces the clinic-wide default whenever the branch has one set.
+    branch = None
+    if data.branch_id is not None:
+        branch = get_branch(db, data.branch_id)
+        if branch is None or not branch.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Selected branch was not found or is no longer active.",
+            )
+    schedule = branch_working_hours(branch)
+
     booking_date = _parse_date(data.date)
     today = date.today()
 
@@ -179,7 +199,7 @@ def validate_and_create_booking(db: Session, data: BookingCreate) -> Booking:
             detail="Booking date cannot be in the past.",
         )
 
-    if not is_working_day(booking_date):
+    if not is_working_day(booking_date, schedule):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"The clinic is closed on {WEEKDAY_NAMES[booking_date.weekday()]}s. Please choose a working day.",
@@ -193,11 +213,11 @@ def validate_and_create_booking(db: Session, data: BookingCreate) -> Booking:
 
     # Best-effort capacity check (soft — the authoritative uniqueness
     # guarantee is the retry loop + DB constraint in the CRUD layer).
-    hours = get_working_hours(booking_date)
+    hours = get_working_hours(booking_date, schedule)
     close_dt = datetime.combine(booking_date, hours[1])
     now = datetime.now()
     projected_ahead = count_active_bookings_for_date(db, data.date)
-    projected_start, _ = _estimate_window(booking_date, projected_ahead, now)
+    projected_start, _ = _estimate_window(booking_date, projected_ahead, now, schedule)
     if projected_start >= close_dt:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -205,7 +225,13 @@ def validate_and_create_booking(db: Session, data: BookingCreate) -> Booking:
         )
 
     def estimate_fn(patients_ahead: int):
-        return _estimate_window(booking_date, patients_ahead, now)
+        return _estimate_window(booking_date, patients_ahead, now, schedule)
+
+    fee = get_consultation_fee(db)
+    if branch is not None:
+        branch_fee = branch.consultation_price if is_consultation else branch.consultation_fee
+        if branch_fee is not None:
+            fee = branch_fee
 
     return create_booking_with_queue_number(
         db,
@@ -218,7 +244,8 @@ def validate_and_create_booking(db: Session, data: BookingCreate) -> Booking:
         date=data.date,
         time=None,
         message=data.message,
-        consultation_fee=get_consultation_fee(db),
+        consultation_fee=fee,
+        branch_id=data.branch_id,
         payment_method=PaymentMethod(data.payment_method.value),
         payment_status=PaymentStatus.PENDING,
     )
@@ -238,6 +265,7 @@ def booking_to_public_response(db: Session, booking: Booking) -> dict:
         "estimated_arrival_start": booking.estimated_arrival_start,
         "estimated_arrival_end": booking.estimated_arrival_end,
         "consultation_fee": booking.consultation_fee,
+        "branch_name": booking.branch_name,
         "payment_method": booking.payment_method,
         "payment_status": booking.payment_status,
     }
@@ -289,7 +317,18 @@ def confirm_online_payment(db: Session, booking_id: int, phone: str) -> Booking:
     return updated
 
 
-def mark_arrival(db: Session, booking_id: int, arrived: bool) -> Booking:
+def _stamp_audit(db: Session, booking: Booking, current_user: User) -> Booking:
+    """Record who last touched this booking and, if no branch has claimed it
+    yet, which branch handled the patient (see core/database.py Booking)."""
+    booking.updated_by = current_user.username
+    if booking.branch_id is None and current_user.branch_id is not None:
+        booking.branch_id = current_user.branch_id
+    db.commit()
+    db.refresh(booking)
+    return booking
+
+
+def mark_arrival(db: Session, booking_id: int, arrived: bool, current_user: User) -> Booking:
     booking = crud_get(db, booking_id)
     if booking is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
@@ -303,7 +342,7 @@ def mark_arrival(db: Session, booking_id: int, arrived: bool) -> Booking:
                 detail="A patient can only be marked as entered on the day of their booking.",
             )
         now = datetime.now()
-        if not is_within_working_hours(now):
+        if not is_within_working_hours(now, branch_working_hours(booking.branch)):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="A patient can only be marked as entered during the clinic's working hours.",
@@ -314,28 +353,29 @@ def mark_arrival(db: Session, booking_id: int, arrived: bool) -> Booking:
                 detail="This booking was cancelled and cannot be marked as entered.",
             )
 
-    return crud_set_arrival(db, booking_id, arrived)
+    booking = crud_set_arrival(db, booking_id, arrived)
+    return _stamp_audit(db, booking, current_user)
 
 
-def set_consultation_hint(db: Session, booking_id: int, dismissed: bool) -> Booking:
+def set_consultation_hint(db: Session, booking_id: int, dismissed: bool, current_user: User) -> Booking:
     booking = crud_set_hint(db, booking_id, dismissed)
     if booking is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
-    return booking
+    return _stamp_audit(db, booking, current_user)
 
 
-def change_booking_status(db: Session, booking_id: int, update: BookingStatusUpdate):
+def change_booking_status(db: Session, booking_id: int, update: BookingStatusUpdate, current_user: User):
     booking = crud_update_status(db, booking_id, BookingStatus(update.status.value))
     if booking is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
-    return booking
+    return _stamp_audit(db, booking, current_user)
 
 
-def set_extra_charge(db: Session, booking_id: int, update: ExtraChargeUpdate) -> Booking:
+def set_extra_charge(db: Session, booking_id: int, update: ExtraChargeUpdate, current_user: User) -> Booking:
     booking = crud_set_extra_charge(db, booking_id, update.amount, update.description, update.paid)
     if booking is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
-    return booking
+    return _stamp_audit(db, booking, current_user)
 
 
 def _clean(value: str | None) -> str | None:
@@ -345,7 +385,7 @@ def _clean(value: str | None) -> str | None:
     return trimmed or None
 
 
-def set_medical_record(db: Session, booking_id: int, update: MedicalRecordUpdate) -> Booking:
+def set_medical_record(db: Session, booking_id: int, update: MedicalRecordUpdate, current_user: User) -> Booking:
     booking = crud_set_medical_record(
         db,
         booking_id,
@@ -358,7 +398,7 @@ def set_medical_record(db: Session, booking_id: int, update: MedicalRecordUpdate
     )
     if booking is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
-    return booking
+    return _stamp_audit(db, booking, current_user)
 
 
 def remove_booking(db: Session, booking_id: int):
@@ -367,9 +407,16 @@ def remove_booking(db: Session, booking_id: int):
     return True
 
 
-def list_bookings(db: Session, skip: int = 0, limit: int = 50, status_filter: str | None = None, date: str | None = None):
+def list_bookings(
+    db: Session,
+    skip: int = 0,
+    limit: int = 50,
+    status_filter: str | None = None,
+    date: str | None = None,
+    branch_id: int | None = None,
+):
     bs = BookingStatus(status_filter) if status_filter else None
-    return crud_all(db, skip=skip, limit=limit, status=bs, date=date)
+    return crud_all(db, skip=skip, limit=limit, status=bs, date=date, branch_id=branch_id)
 
 
 def get_single_booking(db: Session, booking_id: int):

@@ -56,6 +56,10 @@ class BookingCreate(BaseModel):
     date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$", examples=["2026-08-20"])
     message: Optional[str] = Field(None, max_length=500)
     payment_method: PaymentMethodEnum = PaymentMethodEnum.CLINIC
+    # Which branch the patient picked at booking time — stamped straight onto
+    # the booking (see services/booking_service.py). Optional so booking still
+    # works for clinics that haven't set up branches yet.
+    branch_id: Optional[int] = None
 
 
 class BookingStatusUpdate(BaseModel):
@@ -79,6 +83,13 @@ class ConsultationFeeUpdate(BaseModel):
     booking. Applies to bookings made after it's set (existing ones keep the
     fee they were quoted)."""
     fee: float = Field(..., ge=0, examples=[200.0])
+
+
+class ConsultationValidityUpdate(BaseModel):
+    """How many days a completed consultation stays valid — the admin
+    dashboard's "has consultation" follow-up reminder on a completed exam
+    stops showing once the linked consultation is older than this."""
+    days: int = Field(..., ge=1, le=365, examples=[14])
 
 
 class ExtraChargeUpdate(BaseModel):
@@ -149,6 +160,12 @@ class BookingResponse(BaseModel):
     chronic_conditions: Optional[str] = None
     current_medications: Optional[str] = None
 
+    # Audit trail — which branch handled this patient and who last touched
+    # the record. See core/database.py Booking for how these get stamped.
+    branch_id: Optional[int] = None
+    branch_name: Optional[str] = None
+    updated_by: Optional[str] = None
+
     created_at: datetime
     updated_at: datetime
 
@@ -172,6 +189,7 @@ class BookingPublicResponse(BaseModel):
     estimated_arrival_end: Optional[datetime] = None
 
     consultation_fee: Optional[float] = None
+    branch_name: Optional[str] = None
     payment_method: PaymentMethodEnum
     payment_status: PaymentStatusEnum
 
@@ -213,4 +231,5 @@ class ClinicScheduleResponse(BaseModel):
     max_consultation_minutes: int
     booking_window_days: int
     consultation_fee: float = 0.0
+    consultation_validity_days: int = 14
     currency: str = "EGP"

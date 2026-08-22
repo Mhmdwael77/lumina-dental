@@ -41,6 +41,9 @@ export interface Booking {
   follow_up_notes?: string | null;
   chronic_conditions?: string | null;
   current_medications?: string | null;
+  branch_id?: number | null;
+  branch_name?: string | null;
+  updated_by?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -67,6 +70,7 @@ export interface BookingConfirmation {
   estimated_arrival_start?: string | null;
   estimated_arrival_end?: string | null;
   consultation_fee?: number | null;
+  branch_name?: string | null;
   payment_method: PaymentMethod;
   payment_status: PaymentStatus;
 }
@@ -102,6 +106,7 @@ export interface ClinicSchedule {
   max_consultation_minutes: number;
   booking_window_days: number;
   consultation_fee: number;
+  consultation_validity_days: number;
   currency: string;
 }
 
@@ -114,6 +119,15 @@ export interface BookingCreateData {
   date: string;
   message?: string;
   payment_method: PaymentMethod;
+  branch_id?: number | null;
+}
+
+export interface PublicBranch {
+  id: number;
+  name: string;
+  address?: string | null;
+  consultation_fee?: number | null;
+  consultation_price?: number | null;
 }
 
 /** A structured API error the UI can show directly to the user. */
@@ -214,9 +228,12 @@ export async function fetchPatientBookings(token: string, phone: string): Promis
 }
 
 /** Fetch all bookings from backend (or fallback) */
-export async function fetchBookings(token: string): Promise<Booking[]> {
+/** Pass branchId to only fetch that branch's bookings (staff are always
+ * scoped server-side to their own branch regardless of what's passed). */
+export async function fetchBookings(token: string, branchId?: number): Promise<Booking[]> {
   try {
-    const res = await fetch(`${API_BASE_URL}/bookings/`, {
+    const qs = branchId ? `?branch_id=${branchId}` : "";
+    const res = await fetch(`${API_BASE_URL}/bookings/${qs}`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -277,15 +294,27 @@ export async function submitBooking(data: BookingCreateData): Promise<BookingCon
 }
 
 /** Get the clinic's configured working days/hours & consultation duration. */
-export async function getClinicSchedule(): Promise<ClinicSchedule> {
-  const res = await fetch(`${API_BASE_URL}/clinic/schedule`, { cache: "no-store" });
+/** Pass branchId to scope working days/hours to that branch; omit for the
+ * clinic-wide default. */
+export async function getClinicSchedule(branchId?: number): Promise<ClinicSchedule> {
+  const qs = branchId ? `?branch_id=${branchId}` : "";
+  const res = await fetch(`${API_BASE_URL}/clinic/schedule${qs}`, { cache: "no-store" });
   if (!res.ok) throw new ApiError("Could not load the clinic schedule.", res.status);
   return res.json();
 }
 
-/** Queue preview ("Patients already booked: N") for a candidate date. */
-export async function getAvailability(date: string): Promise<Availability> {
-  const res = await fetch(`${API_BASE_URL}/clinic/availability?date=${encodeURIComponent(date)}`, {
+/** Active branches for the public booking form (no auth required). */
+export async function listPublicBranches(): Promise<PublicBranch[]> {
+  const res = await fetch(`${API_BASE_URL}/branches/public`, { cache: "no-store" });
+  if (!res.ok) throw new ApiError("Could not load clinic branches.", res.status);
+  return res.json();
+}
+
+/** Queue preview ("Patients already booked: N") for a candidate date.
+ * Pass branchId to scope working days/hours to that branch. */
+export async function getAvailability(date: string, branchId?: number): Promise<Availability> {
+  const qs = branchId ? `&branch_id=${branchId}` : "";
+  const res = await fetch(`${API_BASE_URL}/clinic/availability?date=${encodeURIComponent(date)}${qs}`, {
     cache: "no-store",
   });
   if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not check availability."), res.status);
@@ -527,6 +556,21 @@ export async function updateConsultationFee(
   return res.json();
 }
 
+/** Set how many days a completed consultation stays valid for the "has
+ *  consultation" follow-up reminder on a completed exam (staff). */
+export async function updateConsultationValidityDays(
+  token: string,
+  days: number
+): Promise<{ consultation_validity_days: number }> {
+  const res = await fetch(`${API_BASE_URL}/clinic/consultation-validity`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ days }),
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not update the consultation validity."), res.status);
+  return res.json();
+}
+
 /** Delete an expense. */
 export async function deleteExpense(token: string, expenseId: number): Promise<boolean> {
   const res = await fetch(`${API_BASE_URL}/finance/expenses/${expenseId}`, {
@@ -565,13 +609,11 @@ export interface MedicalImage {
   created_at?: string;
 }
 
-export interface MedicalRecord {
+export interface MedicalRecordEntry {
   id: number;
-  patient_name: string;
-  gender?: string | null;
-  age?: number | null;
-  phone?: string | null;
+  date: string;
   diagnosis?: string | null;
+  symptoms?: string | null;
   prescription?: string | null;
   follow_up_needed: boolean;
   follow_up_notes?: string | null;
@@ -583,12 +625,30 @@ export interface MedicalRecord {
   updated_at?: string;
 }
 
-export interface MedicalRecordInput {
+export interface MedicalRecord {
+  id: number;
+  patient_name: string;
+  gender?: string | null;
+  age?: number | null;
+  phone?: string | null;
+  entries: MedicalRecordEntry[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** The patient's fixed identity data — name/gender/age/phone. */
+export interface MedicalRecordProfileInput {
   patient_name: string;
   gender?: string;
   age?: number | null;
   phone?: string;
+}
+
+/** One dated visit — diagnosis/symptoms/etc. as of that date. */
+export interface MedicalRecordEntryInput {
+  date: string;
   diagnosis?: string;
+  symptoms?: string;
   prescription?: string;
   follow_up_needed: boolean;
   follow_up_notes?: string;
@@ -610,7 +670,7 @@ export async function listMedicalRecords(token: string, search?: string): Promis
   return res.json();
 }
 
-export async function createMedicalRecord(token: string, data: MedicalRecordInput): Promise<MedicalRecord> {
+export async function createMedicalRecord(token: string, data: MedicalRecordProfileInput): Promise<MedicalRecord> {
   const res = await fetch(`${API_BASE_URL}/medical-records`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -620,7 +680,7 @@ export async function createMedicalRecord(token: string, data: MedicalRecordInpu
   return res.json();
 }
 
-export async function editMedicalRecord(token: string, id: number, data: MedicalRecordInput): Promise<MedicalRecord> {
+export async function editMedicalRecord(token: string, id: number, data: MedicalRecordProfileInput): Promise<MedicalRecord> {
   const res = await fetch(`${API_BASE_URL}/medical-records/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -639,10 +699,47 @@ export async function deleteMedicalRecord(token: string, id: number): Promise<bo
   return true;
 }
 
-export async function uploadMedicalImage(token: string, recordId: number, file: File): Promise<MedicalImage> {
+export async function createMedicalRecordEntry(
+  token: string,
+  recordId: number,
+  data: MedicalRecordEntryInput
+): Promise<MedicalRecordEntry> {
+  const res = await fetch(`${API_BASE_URL}/medical-records/${recordId}/entries`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not add the visit entry."), res.status);
+  return res.json();
+}
+
+export async function editMedicalRecordEntry(
+  token: string,
+  entryId: number,
+  data: MedicalRecordEntryInput
+): Promise<MedicalRecordEntry> {
+  const res = await fetch(`${API_BASE_URL}/medical-records/entries/${entryId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not save the visit entry."), res.status);
+  return res.json();
+}
+
+export async function deleteMedicalRecordEntry(token: string, entryId: number): Promise<boolean> {
+  const res = await fetch(`${API_BASE_URL}/medical-records/entries/${entryId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not delete the visit entry."), res.status);
+  return true;
+}
+
+export async function uploadMedicalImage(token: string, entryId: number, file: File): Promise<MedicalImage> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${API_BASE_URL}/medical-records/${recordId}/images`, {
+  const res = await fetch(`${API_BASE_URL}/medical-records/entries/${entryId}/images`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` }, // no Content-Type: browser sets the multipart boundary
     body: form,
@@ -658,6 +755,145 @@ export async function deleteMedicalImage(token: string, imageId: number): Promis
   });
   if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not delete the image."), res.status);
   return true;
+}
+
+// ── Clinic Branches ──────────────────────────────────────────────────────────
+
+export interface DayHours {
+  opens: string; // "HH:MM"
+  closes: string;
+}
+
+/** Day name -> hours, or null if closed that day. Same shape as
+ * ClinicSchedule.hours_by_day. */
+export type WorkingHours = Record<string, DayHours | null>;
+
+export interface Branch {
+  id: number;
+  name: string;
+  address?: string | null;
+  consultation_fee?: number | null;
+  consultation_price?: number | null;
+  consultation_duration_minutes?: number | null;
+  consultation_validity_days?: number | null;
+  working_hours?: WorkingHours | null;
+  is_active: boolean;
+  staff_count: number;
+  created_at: string;
+}
+
+export interface BranchInput {
+  name: string;
+  address?: string;
+  consultation_fee: number;
+  consultation_price: number;
+  consultation_duration_minutes: number;
+  consultation_validity_days: number;
+  working_hours?: WorkingHours;
+}
+
+export interface BranchStaff {
+  id: number;
+  username: string;
+  role: string;
+  branch_id?: number | null;
+  created_at: string;
+}
+
+export async function listBranches(token: string): Promise<Branch[]> {
+  const res = await fetch(`${API_BASE_URL}/branches/`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not load branches."), res.status);
+  return res.json();
+}
+
+export async function createBranch(token: string, data: BranchInput): Promise<Branch> {
+  const res = await fetch(`${API_BASE_URL}/branches/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not create the branch."), res.status);
+  return res.json();
+}
+
+export async function updateBranch(token: string, id: number, data: Partial<BranchInput & { is_active: boolean }>): Promise<Branch> {
+  const res = await fetch(`${API_BASE_URL}/branches/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not update the branch."), res.status);
+  return res.json();
+}
+
+export async function deleteBranch(token: string, id: number): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/branches/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not delete the branch."), res.status);
+}
+
+export async function listBranchStaff(token: string, branchId: number): Promise<BranchStaff[]> {
+  const res = await fetch(`${API_BASE_URL}/branches/${branchId}/staff`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not load branch staff."), res.status);
+  return res.json();
+}
+
+export async function createBranchStaff(
+  token: string,
+  branchId: number,
+  data: { username: string; password: string }
+): Promise<BranchStaff> {
+  const res = await fetch(`${API_BASE_URL}/branches/${branchId}/staff`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not create the staff account."), res.status);
+  return res.json();
+}
+
+export async function resetBranchStaffPassword(
+  token: string,
+  branchId: number,
+  userId: number,
+  password: string
+): Promise<BranchStaff> {
+  const res = await fetch(`${API_BASE_URL}/branches/${branchId}/staff/${userId}/password`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not reset the password."), res.status);
+  return res.json();
+}
+
+export async function deleteBranchStaff(token: string, branchId: number, userId: number): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/branches/${branchId}/staff/${userId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not remove the staff account."), res.status);
+}
+
+/** Current authenticated user — used to gate admin-only UI (e.g. Clinic
+ *  Settings) since only the ADMIN role may manage branches. */
+export async function fetchCurrentUser(
+  token: string
+): Promise<{ id: number; username: string; role: string; branch_id?: number | null; branch_name?: string | null }> {
+  const res = await fetch(`${API_BASE_URL}/auth/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new ApiError(await parseErrorDetail(res, "Could not load the current user."), res.status);
+  return res.json();
 }
 
 /** Delete a booking */

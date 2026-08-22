@@ -19,5 +19,7 @@ class UserResponse(BaseModel):
     id: int
     username: str
     role: str
+    branch_id: int | None = None
+    branch_name: str | None = None
 
     model_config = {"from_attributes": True}

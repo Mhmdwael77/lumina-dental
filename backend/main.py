@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from core.config import settings
 from core.database import init_db
-from routers import booking, auth, clinic, finance, medical_records
+from routers import booking, auth, clinic, finance, medical_records, branches
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -59,6 +59,7 @@ app.include_router(auth.router)
 app.include_router(clinic.router)
 app.include_router(finance.router)
 app.include_router(medical_records.router)
+app.include_router(branches.router)
 
 # Serve uploaded medical images. Local single-clinic app, so these are served
 # statically (no per-file auth) — the whole backend runs on 127.0.0.1.

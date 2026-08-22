@@ -12,7 +12,7 @@ from datetime import date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from core.dependencies import get_db, require_staff
+from core.dependencies import get_db, require_admin
 from core.database import User
 from core.crud.expense import create_expense, list_expenses, delete_expense
 from schemas.finance import ExpenseCreate, ExpenseResponse, FinanceSummary
@@ -28,7 +28,7 @@ def finance_summary(
     start: str | None = Query(None, pattern=_DATE_RE),
     end: str | None = Query(None, pattern=_DATE_RE),
     db: Session = Depends(get_db),
-    _: User = Depends(require_staff),
+    _: User = Depends(require_admin),
 ):
     # Default range: last 30 days ending today.
     today = date.today()
@@ -44,7 +44,7 @@ def get_expenses(
     start: str | None = Query(None, pattern=_DATE_RE),
     end: str | None = Query(None, pattern=_DATE_RE),
     db: Session = Depends(get_db),
-    _: User = Depends(require_staff),
+    _: User = Depends(require_admin),
 ):
     return list_expenses(db, start=start, end=end)
 
@@ -58,7 +58,7 @@ def get_expenses(
 def add_expense(
     data: ExpenseCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_staff),
+    _: User = Depends(require_admin),
 ):
     return create_expense(
         db,
@@ -78,7 +78,7 @@ def add_expense(
 def remove_expense(
     expense_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_staff),
+    _: User = Depends(require_admin),
 ):
     if not delete_expense(db, expense_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found")

@@ -152,12 +152,15 @@ def get_all_bookings(
     limit: int = 50,
     status: BookingStatus | None = None,
     date: str | None = None,
+    branch_id: int | None = None,
 ) -> list[Booking]:
     q = db.query(Booking)
     if status is not None:
         q = q.filter(Booking.status == status)
     if date is not None:
         q = q.filter(Booking.date == date)
+    if branch_id is not None:
+        q = q.filter(Booking.branch_id == branch_id)
     return q.order_by(Booking.date.asc(), Booking.queue_number.asc()).offset(skip).limit(limit).all()
 
 

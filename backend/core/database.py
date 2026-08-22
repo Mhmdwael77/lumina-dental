@@ -136,6 +136,22 @@ class Booking(Base):
     reminder_status = Column(SAEnum(ReminderStatus), default=ReminderStatus.PENDING, nullable=False)
     reminder_sent_at = Column(DateTime, nullable=True)
 
+    # ── Audit trail ───────────────────────────────────────────────────────
+    # Bookings are created through the public, unauthenticated endpoint (used
+    # by both patients and the admin's "walk-in" form), so there's no staff
+    # identity at creation time. Instead, branch_id is stamped the first time
+    # an authenticated staff/admin account touches the booking (status
+    # change, medical record, etc.) from that user's own branch — recording
+    # which branch actually handled the patient. updated_by is refreshed on
+    # every such action, regardless of branch.
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True)
+    updated_by = Column(String(60), nullable=True)  # username of the staff/admin who last touched this booking
+    branch = relationship("Branch")
+
+    @property
+    def branch_name(self) -> str | None:
+        return self.branch.name if self.branch else None
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
                         onupdate=lambda: datetime.now(timezone.utc))
@@ -148,7 +164,47 @@ class User(Base):
     username = Column(String(60), unique=True, nullable=False, index=True)
     hashed_password = Column(String(255), nullable=False)
     role = Column(SAEnum(UserRole), default=UserRole.STAFF, nullable=False)
+    # NULL = not tied to a specific branch (the seeded admin/staff accounts,
+    # and any doctor/admin account managing branches). Staff created from the
+    # branch settings page get this set to the branch they log in for.
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    branch = relationship("Branch", back_populates="staff")
+
+
+class Branch(Base):
+    """A clinic branch/location. The doctor manages branches and, per branch,
+    the staff accounts that log in for it, that branch's consultation fee
+    and duration, and its own working days/hours — a patient booking at this
+    branch can only pick a day it's actually open (see core/clinic_schedule.py)."""
+    __tablename__ = "branches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(120), nullable=False)
+    address = Column(String(255), nullable=True)
+    # The general exam/visit fee, charged on any appointment regardless of
+    # service type.
+    consultation_fee = Column(Float, nullable=True)
+    # The price specifically for a "Consultation" (service_type=consultation)
+    # booking — a separate figure from the general exam fee above.
+    consultation_price = Column(Float, nullable=True)
+    consultation_duration_minutes = Column(Integer, nullable=True)
+    # How many days a completed consultation at this branch stays valid for
+    # the "has consultation" follow-up reminder on a completed exam. Bookings
+    # aren't branch-scoped yet, so the effective clinic-wide value used for
+    # that enforcement (see core/crud/setting.py) is kept in sync with
+    # whichever branch was last saved — see services/branch_service.py.
+    consultation_validity_days = Column(Integer, nullable=True)
+    # JSON string: {"monday": {"opens": "10:00", "closes": "21:00"}, "friday":
+    # null, ...} — same shape as ClinicScheduleResponse.hours_by_day. NULL
+    # means this branch hasn't set its own hours yet, so booking falls back
+    # to the clinic-wide default (see core/clinic_schedule.py).
+    working_hours = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    staff = relationship("User", back_populates="branch")
 
 
 class Setting(Base):
@@ -176,9 +232,11 @@ class Expense(Base):
 
 
 class MedicalRecord(Base):
-    """A standalone patient medical file — not tied to a booking, so records can
-    be kept for walk-ins or anyone. Holds the clinical notes plus attached
-    images (X-rays / photos)."""
+    """A standalone patient file — not tied to a booking, so records can be
+    kept for walk-ins or anyone. Holds only the patient's fixed identity
+    info; the clinical picture (diagnosis, symptoms, ...) changes visit to
+    visit, so it lives on dated MedicalRecordEntry rows underneath instead
+    of directly on this record."""
     __tablename__ = "medical_records"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -186,7 +244,28 @@ class MedicalRecord(Base):
     gender = Column(String(20), nullable=True)          # male / female / other
     age = Column(Integer, nullable=True)
     phone = Column(String(30), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+    entries = relationship(
+        "MedicalRecordEntry", back_populates="record", cascade="all, delete-orphan",
+        order_by="MedicalRecordEntry.date.desc(), MedicalRecordEntry.id.desc()",
+    )
+
+
+class MedicalRecordEntry(Base):
+    """One dated visit entry under a patient's medical record — the
+    diagnosis, symptoms, prescription etc. as of that date, plus any images
+    taken that visit. A patient accumulates one of these per visit instead
+    of the record being overwritten each time."""
+    __tablename__ = "medical_record_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    record_id = Column(Integer, ForeignKey("medical_records.id", ondelete="CASCADE"), nullable=False, index=True)
+    date = Column(String(10), nullable=False)  # "YYYY-MM-DD"
     diagnosis = Column(Text, nullable=True)
+    symptoms = Column(Text, nullable=True)
     prescription = Column(Text, nullable=True)
     follow_up_needed = Column(Boolean, default=False, nullable=False)
     follow_up_notes = Column(String(255), nullable=True)
@@ -197,25 +276,26 @@ class MedicalRecord(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
                         onupdate=lambda: datetime.now(timezone.utc))
 
+    record = relationship("MedicalRecord", back_populates="entries")
     images = relationship(
-        "MedicalImage", back_populates="record", cascade="all, delete-orphan",
+        "MedicalImage", back_populates="entry", cascade="all, delete-orphan",
         order_by="MedicalImage.id",
     )
 
 
 class MedicalImage(Base):
-    """An image (X-ray / photo) attached to a medical record. The file lives on
-    disk under the uploads dir; this row keeps the reference + metadata."""
+    """An image (X-ray / photo) attached to one visit entry. The file lives
+    on disk under the uploads dir; this row keeps the reference + metadata."""
     __tablename__ = "medical_images"
 
     id = Column(Integer, primary_key=True, index=True)
-    record_id = Column(Integer, ForeignKey("medical_records.id", ondelete="CASCADE"), nullable=False, index=True)
+    entry_id = Column(Integer, ForeignKey("medical_record_entries.id", ondelete="CASCADE"), nullable=False, index=True)
     filename = Column(String(255), nullable=False)      # stored name on disk
     original_name = Column(String(255), nullable=True)
     content_type = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    record = relationship("MedicalRecord", back_populates="images")
+    entry = relationship("MedicalRecordEntry", back_populates="images")
 
     @property
     def url(self) -> str:
@@ -231,6 +311,7 @@ def init_db() -> None:
     requiring a dropped/recreated database.db)."""
     Base.metadata.create_all(bind=engine)
     _migrate_missing_columns()
+    _migrate_legacy_medical_record_fields()
     _seed_default_users()
 
 
@@ -283,3 +364,84 @@ def _migrate_missing_columns() -> None:
                 conn.execute(
                     text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {col_type}{default_clause}')
                 )
+
+
+def _migrate_legacy_medical_record_fields() -> None:
+    """One-time backfill: diagnosis/prescription/etc. used to live directly
+    on MedicalRecord; they now live on dated MedicalRecordEntry rows instead
+    so a patient's diagnosis history can hold more than one visit, and
+    images now attach to an entry (entry_id) instead of the record
+    (record_id). Any existing record with old clinical data gets it copied
+    into a single entry (dated to when the record was created) the first
+    time this runs. The two checks below are independent — each only does
+    work (and only drops its own stale column) the first time it finds one,
+    so this stays safe to call on every startup."""
+    inspector = inspect(engine)
+
+    if "medical_records" in inspector.get_table_names():
+        legacy_columns = {
+            "diagnosis", "prescription", "follow_up_needed", "follow_up_notes",
+            "chronic_conditions", "current_medications", "notes",
+        }
+        existing_columns = {c["name"] for c in inspector.get_columns("medical_records")}
+        present = legacy_columns & existing_columns
+        if present:
+            with engine.begin() as conn:
+                already_migrated = {
+                    row[0] for row in conn.execute(text("SELECT DISTINCT record_id FROM medical_record_entries"))
+                }
+                rows = conn.execute(text(
+                    "SELECT id, diagnosis, prescription, follow_up_needed, follow_up_notes, "
+                    "chronic_conditions, current_medications, notes, created_at FROM medical_records"
+                )).fetchall()
+                for row in rows:
+                    if row.id in already_migrated:
+                        continue
+                    has_data = any([
+                        row.diagnosis, row.prescription, row.chronic_conditions,
+                        row.current_medications, row.notes, row.follow_up_notes,
+                    ])
+                    if not has_data:
+                        continue
+                    entry_date = str(row.created_at)[:10] if row.created_at else datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                    conn.execute(
+                        text(
+                            "INSERT INTO medical_record_entries "
+                            "(record_id, date, diagnosis, prescription, follow_up_needed, follow_up_notes, "
+                            "chronic_conditions, current_medications, notes, created_at, updated_at) "
+                            "VALUES (:record_id, :date, :diagnosis, :prescription, :follow_up_needed, :follow_up_notes, "
+                            ":chronic_conditions, :current_medications, :notes, :created_at, :created_at)"
+                        ),
+                        {
+                            "record_id": row.id,
+                            "date": entry_date,
+                            "diagnosis": row.diagnosis,
+                            "prescription": row.prescription,
+                            "follow_up_needed": row.follow_up_needed,
+                            "follow_up_notes": row.follow_up_notes,
+                            "chronic_conditions": row.chronic_conditions,
+                            "current_medications": row.current_medications,
+                            "notes": row.notes,
+                            "created_at": row.created_at,
+                        },
+                    )
+
+                # The old columns are gone from the model now, but a couple
+                # (e.g. follow_up_needed) were NOT NULL with no server-side
+                # default, which breaks every future insert if left in place
+                # unmigrated. Their data is safely copied above, so drop
+                # them outright (SQLite 3.35+).
+                for col in present:
+                    conn.execute(text(f'ALTER TABLE "medical_records" DROP COLUMN "{col}"'))
+
+    if "medical_images" in inspector.get_table_names():
+        image_columns = {c["name"] for c in inspector.get_columns("medical_images")}
+        if "record_id" in image_columns:
+            # record_id is part of a FOREIGN KEY constraint, which SQLite
+            # refuses to drop via ALTER TABLE ... DROP COLUMN. No image rows
+            # existed under the old shape at the time this migration was
+            # introduced, so just recreate the table fresh under the new
+            # schema (entry_id) instead of attempting a column-level drop.
+            with engine.begin() as conn:
+                conn.execute(text('DROP TABLE "medical_images"'))
+            MedicalImage.__table__.create(bind=engine)

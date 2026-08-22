@@ -32,4 +32,10 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
 
 @router.get("/me", response_model=UserResponse, summary="Get current user info")
 def me(current_user: User = Depends(get_current_user)):
-    return current_user
+    return UserResponse(
+        id=current_user.id,
+        username=current_user.username,
+        role=current_user.role.value,
+        branch_id=current_user.branch_id,
+        branch_name=current_user.branch.name if current_user.branch else None,
+    )

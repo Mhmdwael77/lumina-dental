@@ -35,13 +35,12 @@ import {
   CalendarClock,
   Receipt,
   ClipboardList,
-  Pill,
-  Activity,
 } from "lucide-react";
 import {
   ApiError,
   Booking,
   BookingStatus,
+  Branch,
   getToken,
   loginAdmin,
   removeToken,
@@ -51,15 +50,18 @@ import {
   updateArrivalStatus,
   updateConsultationHintDismissed,
   updateExtraCharge,
-  updateMedicalRecord,
   deleteBooking,
   submitBooking,
+  fetchCurrentUser,
+  getClinicSchedule,
+  listBranches,
 } from "@/lib/api";
 import { TREATMENT_OPTIONS, SERVICE_OPTIONS, CONSULTATION_SERVICE } from "@/lib/constants";
 import { useLanguage } from "@/lib/i18n/LanguageContext";
 import { LanguageToggle } from "@/components/ui/LanguageToggle";
 import { FinancialDashboard } from "@/components/admin/FinancialDashboard";
 import { MedicalRecords } from "@/components/admin/MedicalRecords";
+import { ClinicSettings } from "@/components/admin/ClinicSettings";
 
 /** A booking is a consultation when the backend tagged its service type. */
 const isConsultation = (b: Booking) => b.service_type === "consultation";
@@ -179,7 +181,31 @@ export default function AdminPage() {
 
   // Dashboard view mode: "agenda" (Day view), "table" (All bookings) or
   // "consultations" (only consultation requests, across all days).
-  const [viewMode, setViewMode] = useState<"agenda" | "table" | "consultations" | "financial" | "records">("agenda");
+  const [viewMode, setViewMode] = useState<
+    "agenda" | "table" | "consultations" | "financial" | "records" | "branches"
+  >("agenda");
+
+  // Only the ADMIN role may manage clinic branches or see Financial/Records —
+  // fetched once per login so those tabs aren't shown to staff accounts that
+  // would just get a 403 from the underlying API anyway. Staff only ever see
+  // Day Agenda, All Bookings, and Consultations, and — since bookings are now
+  // stamped with the branch they were made at — the backend automatically
+  // scopes what a branch-assigned staff account can see to that branch alone.
+  // branchName is shown next to a staff account's name as a reminder of
+  // which branch they're logging in for.
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [branchName, setBranchName] = useState<string | null>(null);
+  const isAdmin = userRole === "admin";
+
+  // Admin-only branch switcher for Day Agenda / All Bookings / Consultations
+  // — "" means all branches. Staff don't get this control since they're
+  // already locked server-side to their own branch.
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [branchFilter, setBranchFilter] = useState("");
+
+  // How many days a completed consultation stays "live" for the "has
+  // consultation" follow-up reminder — configured in Clinic Settings.
+  const [consultationValidityDays, setConsultationValidityDays] = useState(14);
 
   // Selected Date for Agenda View (YYYY-MM-DD)
   const [selectedDate, setSelectedDate] = useState<string>(toLocalIso());
@@ -294,21 +320,6 @@ export default function AdminPage() {
   const [extraChargeSavingId, setExtraChargeSavingId] = useState<number | null>(null);
   const [extraChargeError, setExtraChargeError] = useState("");
 
-  // Medical record editor (diagnosis, prescription, follow-up, chronic
-  // conditions, current medications) — same inline-editor pattern as above.
-  const EMPTY_RECORD = {
-    diagnosis: "",
-    prescription: "",
-    follow_up_needed: false,
-    follow_up_notes: "",
-    chronic_conditions: "",
-    current_medications: "",
-  };
-  const [editingRecordId, setEditingRecordId] = useState<number | null>(null);
-  const [recordDraft, setRecordDraft] = useState(EMPTY_RECORD);
-  const [recordSavingId, setRecordSavingId] = useState<number | null>(null);
-  const [recordError, setRecordError] = useState("");
-
   // Check saved token on mount
   useEffect(() => {
     setMounted(true);
@@ -318,18 +329,64 @@ export default function AdminPage() {
     }
   }, []);
 
-  // Fetch bookings when token is present
+  // Fetch bookings when token is present, and again whenever the admin
+  // switches which branch they're viewing.
   useEffect(() => {
     if (token) {
       loadBookings();
     }
+  }, [token, branchFilter]);
+
+  // Who's logged in — gates the ADMIN-only tabs and surfaces a staff
+  // account's branch in the header.
+  useEffect(() => {
+    if (!token) {
+      setUserRole(null);
+      setBranchName(null);
+      return;
+    }
+    fetchCurrentUser(token)
+      .then((user) => {
+        setUserRole(user.role);
+        setBranchName(user.branch_name ?? null);
+      })
+      .catch(() => {
+        setUserRole(null);
+        setBranchName(null);
+      });
   }, [token]);
+
+  // Belt-and-suspenders: if a staff account somehow lands on an admin-only
+  // view (e.g. their role loads after the tab was already selected), bounce
+  // back to the agenda instead of rendering a view they can't actually use.
+  useEffect(() => {
+    if (userRole && !isAdmin && (viewMode === "financial" || viewMode === "branches" || viewMode === "records")) {
+      setViewMode("agenda");
+    }
+  }, [userRole, isAdmin, viewMode]);
+
+  // Consultation validity window, for the "has consultation" reminder logic.
+  useEffect(() => {
+    if (!token) return;
+    getClinicSchedule()
+      .then((schedule) => setConsultationValidityDays(schedule.consultation_validity_days))
+      .catch(() => {});
+  }, [token]);
+
+  // Branch list for the admin's branch switcher — staff don't need it, they
+  // can only ever see their own branch anyway.
+  useEffect(() => {
+    if (!token || !isAdmin) return;
+    listBranches(token)
+      .then(setBranches)
+      .catch(() => {});
+  }, [token, isAdmin]);
 
   const loadBookings = async () => {
     setIsLoading(true);
     try {
       const activeToken = token || "";
-      const data = await fetchBookings(activeToken);
+      const data = await fetchBookings(activeToken, branchFilter ? Number(branchFilter) : undefined);
       setBookings(data);
     } catch (err) {
       if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
@@ -704,45 +761,6 @@ export default function AdminPage() {
       b.follow_up_notes
     );
 
-  const startEditRecord = (b: Booking) => {
-    setEditingRecordId(b.id);
-    setRecordDraft({
-      diagnosis: b.diagnosis || "",
-      prescription: b.prescription || "",
-      follow_up_needed: b.follow_up_needed || false,
-      follow_up_notes: b.follow_up_notes || "",
-      chronic_conditions: b.chronic_conditions || "",
-      current_medications: b.current_medications || "",
-    });
-    setRecordError("");
-  };
-
-  const cancelEditRecord = () => {
-    setEditingRecordId(null);
-    setRecordError("");
-  };
-
-  const handleSaveRecord = async (bookingId: number) => {
-    setRecordSavingId(bookingId);
-    setRecordError("");
-    try {
-      const updated = await updateMedicalRecord(token || "", bookingId, {
-        diagnosis: recordDraft.diagnosis.trim() || undefined,
-        prescription: recordDraft.prescription.trim() || undefined,
-        follow_up_needed: recordDraft.follow_up_needed,
-        follow_up_notes: recordDraft.follow_up_notes.trim() || undefined,
-        chronic_conditions: recordDraft.chronic_conditions.trim() || undefined,
-        current_medications: recordDraft.current_medications.trim() || undefined,
-      });
-      applyBookingUpdate(updated);
-      setEditingRecordId(null);
-    } catch (err) {
-      setRecordError(err instanceof ApiError ? err.message : t("admin.medical.saveError"));
-    } finally {
-      setRecordSavingId(null);
-    }
-  };
-
   const renderRecordBadge = (b: Booking) => {
     if (!hasMedicalRecord(b)) return null;
     return (
@@ -754,113 +772,6 @@ export default function AdminPage() {
         {t("admin.medical.badge")}
         {b.follow_up_needed ? ` · ${t("admin.medical.followUpShort")}` : ""}
       </span>
-    );
-  };
-
-  const renderRecordPanel = (b: Booking) => {
-    if (editingRecordId !== b.id) return null;
-    const saving = recordSavingId === b.id;
-    const fieldClass =
-      "w-full bg-white border border-[#101820]/15 rounded-xl px-3 py-2 text-xs text-[#101820] outline-none focus:border-blue-500/50 resize-none";
-    const labelClass = "flex items-center gap-1 text-[0.65rem] uppercase tracking-wider text-[#101820]/50 mb-1";
-    return (
-      <div className="p-4 rounded-2xl bg-[#f4f1eb] border border-blue-500/30 space-y-4">
-        <div className="flex items-center gap-2 text-xs font-semibold text-[#101820] uppercase tracking-wider">
-          <span className="flex items-center justify-center h-6 w-6 rounded-lg bg-blue-500/15 text-blue-700">
-            <ClipboardList className="w-3.5 h-3.5" />
-          </span>
-          {t("admin.medical.panelTitle")}
-          <span className="font-normal normal-case tracking-normal text-[#101820]/50">{b.full_name}</span>
-        </div>
-        {recordError && (
-          <p className="text-xs text-red-600 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{recordError}</p>
-        )}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="sm:col-span-2">
-            <label className={labelClass}>
-              <Stethoscope className="w-3 h-3" /> {t("admin.medical.diagnosis")}
-            </label>
-            <textarea
-              rows={2}
-              value={recordDraft.diagnosis}
-              onChange={(e) => setRecordDraft((d) => ({ ...d, diagnosis: e.target.value }))}
-              placeholder={t("admin.medical.diagnosisPlaceholder")}
-              className={fieldClass}
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <label className={labelClass}>
-              <FileText className="w-3 h-3" /> {t("admin.medical.prescription")}
-            </label>
-            <textarea
-              rows={2}
-              value={recordDraft.prescription}
-              onChange={(e) => setRecordDraft((d) => ({ ...d, prescription: e.target.value }))}
-              placeholder={t("admin.medical.prescriptionPlaceholder")}
-              className={fieldClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>
-              <Activity className="w-3 h-3" /> {t("admin.medical.chronic")}
-            </label>
-            <textarea
-              rows={2}
-              value={recordDraft.chronic_conditions}
-              onChange={(e) => setRecordDraft((d) => ({ ...d, chronic_conditions: e.target.value }))}
-              placeholder={t("admin.medical.chronicPlaceholder")}
-              className={fieldClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>
-              <Pill className="w-3 h-3" /> {t("admin.medical.medications")}
-            </label>
-            <textarea
-              rows={2}
-              value={recordDraft.current_medications}
-              onChange={(e) => setRecordDraft((d) => ({ ...d, current_medications: e.target.value }))}
-              placeholder={t("admin.medical.medicationsPlaceholder")}
-              className={fieldClass}
-            />
-          </div>
-          <div className="sm:col-span-2 flex flex-col sm:flex-row sm:items-center gap-3">
-            <label className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-[#101820]/15 text-xs text-[#101820] cursor-pointer shrink-0">
-              <input
-                type="checkbox"
-                checked={recordDraft.follow_up_needed}
-                onChange={(e) => setRecordDraft((d) => ({ ...d, follow_up_needed: e.target.checked }))}
-                className="accent-blue-600 w-3.5 h-3.5"
-              />
-              {t("admin.medical.followUp")}
-            </label>
-            {recordDraft.follow_up_needed && (
-              <input
-                type="text"
-                value={recordDraft.follow_up_notes}
-                onChange={(e) => setRecordDraft((d) => ({ ...d, follow_up_notes: e.target.value }))}
-                placeholder={t("admin.medical.followUpNotesPlaceholder")}
-                className="flex-1 bg-white border border-[#101820]/15 rounded-xl px-3 py-2 text-xs text-[#101820] outline-none focus:border-blue-500/50"
-              />
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-2 pt-1">
-          <button
-            onClick={() => handleSaveRecord(b.id)}
-            disabled={saving}
-            className="px-4 py-1.5 rounded-xl bg-[#101820] text-[#f4f1eb] text-xs font-medium hover:bg-[#101820]/85 transition-colors disabled:opacity-50"
-          >
-            {saving ? t("admin.medical.saving") : t("admin.medical.save")}
-          </button>
-          <button
-            onClick={cancelEditRecord}
-            className="px-3.5 py-1.5 rounded-xl bg-white border border-[#101820]/15 text-[#101820]/70 text-xs font-medium hover:bg-[#101820]/5 transition-colors"
-          >
-            {t("admin.medical.cancel")}
-          </button>
-        </div>
-      </div>
     );
   };
 
@@ -1048,19 +959,32 @@ export default function AdminPage() {
       );
   }, [bookings, searchQuery]);
 
-  // Every COMPLETED exam that has the same patient's consultation (matched by
-  // phone), IGNORING the show/hide flag. Drives whether the "Has consultation"
-  // toggle button appears at all — so staff can flip it back on after hiding it.
+  // A consultation older than the clinic's configured validity window (Clinic
+  // Settings) no longer counts as a live basis for the "has consultation"
+  // reminder — it's stale, so the patient effectively doesn't benefit from it
+  // anymore. Cutoff date recomputes whenever the setting loads/changes.
+  const consultationValidityCutoff = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - consultationValidityDays);
+    return toLocalIso(d);
+  }, [consultationValidityDays]);
+
+  // Every COMPLETED exam that has the same patient's still-valid consultation
+  // (matched by phone, within the validity window), IGNORING the show/hide
+  // flag. Drives whether the "Has consultation" toggle button appears at all
+  // — so staff can flip it back on after hiding it.
   const examsWithMatchedConsultation = useMemo(() => {
     const consults = bookings.filter(isConsultation);
     const map = new Map<number, Booking>();
     for (const b of bookings) {
       if (b.status !== "completed" || isConsultation(b)) continue;
-      const match = consults.find((c) => phonesMatch(c.phone, b.phone));
+      const match = consults.find(
+        (c) => phonesMatch(c.phone, b.phone) && c.date >= consultationValidityCutoff
+      );
       if (match) map.set(b.id, match);
     }
     return map;
-  }, [bookings]);
+  }, [bookings, consultationValidityCutoff]);
 
   // The subset staff have left visible (not dismissed) — drives the badges and
   // the Consultations-tab follow-up cards.
@@ -1248,6 +1172,30 @@ export default function AdminPage() {
                 {t("admin.header.clinicSubtitle")}
               </p>
             </div>
+            {!isAdmin && branchName && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[0.68rem] font-medium bg-[#b99a6b]/15 text-[#101820] border border-[#b99a6b]/30">
+                <Building2 className="w-3 h-3 text-[#b99a6b]" />
+                {t("admin.header.yourBranch", { name: branchName })}
+              </span>
+            )}
+            {isAdmin && branches.length > 0 && (
+              <div className="relative">
+                <Building2 className="absolute left-2.5 rtl:left-auto rtl:right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#b99a6b] pointer-events-none" />
+                <select
+                  value={branchFilter}
+                  onChange={(e) => setBranchFilter(e.target.value)}
+                  title={t("admin.header.branchFilter")}
+                  className="appearance-none pl-8 pr-3 rtl:pr-8 rtl:pl-3 py-1.5 rounded-full text-[0.68rem] font-medium bg-white border border-[#101820]/15 text-[#101820] outline-none focus:border-[#b99a6b] cursor-pointer"
+                >
+                  <option value="">{t("admin.header.allBranches")}</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
@@ -1297,28 +1245,45 @@ export default function AdminPage() {
                   </span>
                 )}
               </button>
-              <button
-                onClick={() => setViewMode("financial")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium uppercase tracking-[0.12em] transition-all ${
-                  viewMode === "financial"
-                    ? "bg-[#101820] text-[#f4f1eb] shadow"
-                    : "text-[#101820]/60 hover:text-[#101820]"
-                }`}
-              >
-                <Wallet className="w-3.5 h-3.5" />
-                <span>{t("admin.header.financial")}</span>
-              </button>
-              <button
-                onClick={() => setViewMode("records")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium uppercase tracking-[0.12em] transition-all ${
-                  viewMode === "records"
-                    ? "bg-[#101820] text-[#f4f1eb] shadow"
-                    : "text-[#101820]/60 hover:text-[#101820]"
-                }`}
-              >
-                <ClipboardList className="w-3.5 h-3.5" />
-                <span>{t("admin.header.records")}</span>
-              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => setViewMode("financial")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium uppercase tracking-[0.12em] transition-all ${
+                    viewMode === "financial"
+                      ? "bg-[#101820] text-[#f4f1eb] shadow"
+                      : "text-[#101820]/60 hover:text-[#101820]"
+                  }`}
+                >
+                  <Wallet className="w-3.5 h-3.5" />
+                  <span>{t("admin.header.financial")}</span>
+                </button>
+              )}
+              {isAdmin && (
+                <button
+                  onClick={() => setViewMode("records")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium uppercase tracking-[0.12em] transition-all ${
+                    viewMode === "records"
+                      ? "bg-[#101820] text-[#f4f1eb] shadow"
+                      : "text-[#101820]/60 hover:text-[#101820]"
+                  }`}
+                >
+                  <ClipboardList className="w-3.5 h-3.5" />
+                  <span>{t("admin.header.records")}</span>
+                </button>
+              )}
+              {isAdmin && (
+                <button
+                  onClick={() => setViewMode("branches")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium uppercase tracking-[0.12em] transition-all ${
+                    viewMode === "branches"
+                      ? "bg-[#101820] text-[#f4f1eb] shadow"
+                      : "text-[#101820]/60 hover:text-[#101820]"
+                  }`}
+                >
+                  <Building2 className="w-3.5 h-3.5" />
+                  <span>{t("admin.branches.title")}</span>
+                </button>
+              )}
             </div>
 
             <LanguageToggle className="bg-white border border-[#101820]/10 shadow-sm text-[#101820]/70 hover:text-[#101820]" />
@@ -1377,8 +1342,8 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* Analytics Cards (hidden on the Financial view — it has its own KPIs) */}
-        {viewMode !== "financial" && viewMode !== "records" && (
+        {/* Analytics Cards (hidden on views that have their own layout) */}
+        {viewMode !== "financial" && viewMode !== "records" && viewMode !== "branches" && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white border border-[#101820]/10 rounded-2xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-2">
@@ -1438,7 +1403,12 @@ export default function AdminPage() {
         {viewMode === "financial" && <FinancialDashboard token={token || ""} onAuthError={handleLogout} />}
 
         {/* ── MEDICAL RECORDS VIEW ─────────────────────────────────────────── */}
-        {viewMode === "records" && <MedicalRecords token={token || ""} onAuthError={handleLogout} />}
+        {viewMode === "records" && (
+          <MedicalRecords token={token || ""} onAuthError={handleLogout} readOnly={!isAdmin} />
+        )}
+
+        {/* ── CLINIC SETTINGS VIEW (branches, per-branch fee/duration + staff) ── */}
+        {viewMode === "branches" && <ClinicSettings token={token || ""} onAuthError={handleLogout} />}
 
         {/* ── 3. AGENDA / DAY SCHEDULE VIEW (جدول اليوم والأيام) ──────────────── */}
         {viewMode === "agenda" && (
@@ -1654,7 +1624,6 @@ export default function AdminPage() {
 
                         {/* Extra Charge Badge — add-on work billed on top of the base appointment */}
                         {renderExtraChargeBadge(b)}
-                        {renderRecordBadge(b)}
 
                         {/* Consultation flag — distinguishes it from a treatment */}
                         {isConsultation(b) && (
@@ -1754,22 +1723,6 @@ export default function AdminPage() {
                           title={t("admin.common.addEditCharge")}
                         >
                           <Receipt className="w-4 h-4" />
-                        </button>
-
-                        <button
-                          onClick={() =>
-                            editingRecordId === b.id ? cancelEditRecord() : startEditRecord(b)
-                          }
-                          className={`p-1.5 rounded-xl border transition-colors ${
-                            editingRecordId === b.id
-                              ? "bg-blue-600 text-white border-blue-600"
-                              : hasMedicalRecord(b)
-                              ? "bg-blue-500/10 hover:bg-blue-600 hover:text-white border-blue-500/30 text-blue-700"
-                              : "bg-[#f4f1eb] hover:bg-blue-600 hover:text-white border-[#101820]/15 text-[#101820]"
-                          }`}
-                          title={t("admin.medical.buttonTitle")}
-                        >
-                          <ClipboardList className="w-4 h-4" />
                         </button>
 
                         <button
@@ -1879,10 +1832,25 @@ export default function AdminPage() {
                         </div>
                       )}
                     </div>
+
+                    {(b.branch_name || b.updated_by) && (
+                      <div className="flex items-center gap-3 text-[0.65rem] text-[#101820]/45">
+                        {b.branch_name && (
+                          <span className="inline-flex items-center gap-1">
+                            <Building2 className="w-3 h-3" />
+                            {t("admin.record.branch")}: {b.branch_name}
+                          </span>
+                        )}
+                        {b.updated_by && (
+                          <span>
+                            {t("admin.record.updatedBy")}: {b.updated_by}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {renderExtraChargePanel(b)}
-                  {renderRecordPanel(b)}
                   </div>
                 ))}
               </div>
@@ -2814,34 +2782,34 @@ export default function AdminPage() {
                       <div className="mb-3">{renderExtraChargePanel(visit)}</div>
                     )}
 
-                    {/* Medical Record — diagnosis, prescription, follow-up, history */}
-                    <div className="flex items-center justify-between gap-2 border-t border-[#101820]/10 pt-3 mb-3">
-                      <div className="flex items-center gap-2">
-                        {renderRecordBadge(visit) || (
-                          <span className="inline-flex items-center gap-1.5 text-xs text-[#101820]/40">
-                            <ClipboardList className="w-3.5 h-3.5 text-[#101820]/25" />
-                            {t("admin.medical.noRecord")}
-                          </span>
-                        )}
+                    {/* Consultation toggle — appears once the exam is completed and
+                        the patient has a consultation. Flip it on/off (yes/no).
+                        The clinical record itself now lives only in the
+                        standalone Medical Records page (admin-only). */}
+                    {examsWithMatchedConsultation.has(visit.id) && (
+                      <div className="flex items-center gap-1.5 border-t border-[#101820]/10 pt-3 mb-3">
+                        <span className="text-[0.65rem] text-[#101820]/50 uppercase tracking-wider mr-1">
+                          {t("admin.common.consultation")}
+                        </span>
+                        <button
+                          onClick={() =>
+                            handleSetConsultationHint(visit.id, !visit.consultation_hint_dismissed)
+                          }
+                          title={
+                            visit.consultation_hint_dismissed
+                              ? t("admin.common.showConsultationTitle")
+                              : t("admin.common.hideConsultationTitle")
+                          }
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                            !visit.consultation_hint_dismissed
+                              ? "bg-[#b99a6b] text-[#101820] hover:bg-[#b99a6b]/85 shadow"
+                              : "bg-[#f4f1eb] text-[#101820]/70 hover:bg-[#b99a6b]/20 hover:text-[#101820]"
+                          }`}
+                        >
+                          <Stethoscope className="w-3.5 h-3.5" />
+                          {visit.consultation_hint_dismissed ? t("admin.common.noConsultation") : t("admin.common.hasConsultation")}
+                        </button>
                       </div>
-                      <button
-                        onClick={() =>
-                          editingRecordId === visit.id ? cancelEditRecord() : startEditRecord(visit)
-                        }
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
-                          editingRecordId === visit.id
-                            ? "bg-blue-600 text-white"
-                            : hasMedicalRecord(visit)
-                            ? "bg-[#f4f1eb] text-[#101820]/70 hover:bg-blue-500/15 hover:text-blue-700"
-                            : "bg-blue-500/10 text-blue-700 border border-blue-500/30 hover:bg-blue-500/20"
-                        }`}
-                      >
-                        <ClipboardList className="w-3.5 h-3.5" />
-                        {hasMedicalRecord(visit) ? t("admin.medical.editRecord") : t("admin.medical.addRecord")}
-                      </button>
-                    </div>
-                    {renderRecordPanel(visit) && (
-                      <div className="mb-3">{renderRecordPanel(visit)}</div>
                     )}
 
                     {/* Status Update Control for this visit */}
@@ -2882,6 +2850,22 @@ export default function AdminPage() {
                         </button>
                       </div>
                     </div>
+
+                    {(visit.branch_name || visit.updated_by) && (
+                      <div className="flex items-center gap-3 border-t border-[#101820]/10 pt-2.5 mt-2.5 text-[0.65rem] text-[#101820]/45">
+                        {visit.branch_name && (
+                          <span className="inline-flex items-center gap-1">
+                            <Building2 className="w-3 h-3" />
+                            {t("admin.record.branch")}: {visit.branch_name}
+                          </span>
+                        )}
+                        {visit.updated_by && (
+                          <span>
+                            {t("admin.record.updatedBy")}: {visit.updated_by}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

@@ -18,7 +18,7 @@ Staff / Admin (JWT required):
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from core.dependencies import get_db, require_staff
+from core.dependencies import get_db, require_staff, require_admin
 from core.database import User
 from schemas.booking import (
     BookingCreate,
@@ -93,10 +93,16 @@ def list_all_bookings(
     limit: int = Query(50, ge=1, le=200),
     status_filter: str | None = Query(None, alias="status"),
     date: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    branch_id: int | None = Query(None),
     db: Session = Depends(get_db),
-    _: User = Depends(require_staff),
+    current_user: User = Depends(require_staff),
 ):
-    return list_bookings(db, skip=skip, limit=limit, status_filter=status_filter, date=date)
+    # Staff tied to a branch only ever see that branch's bookings — any
+    # branch_id they pass is ignored in favor of their own. Staff with no
+    # branch assigned (e.g. the seeded default account) and admins keep
+    # seeing everything unless a branch_id is explicitly requested.
+    effective_branch_id = current_user.branch_id if current_user.branch_id is not None else branch_id
+    return list_bookings(db, skip=skip, limit=limit, status_filter=status_filter, date=date, branch_id=effective_branch_id)
 
 
 @router.get(
@@ -134,9 +140,9 @@ def update_status(
     booking_id: int,
     body: BookingStatusUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_staff),
+    current_user: User = Depends(require_staff),
 ):
-    return change_booking_status(db, booking_id, body)
+    return change_booking_status(db, booking_id, body, current_user)
 
 
 @router.patch(
@@ -148,9 +154,9 @@ def update_arrival(
     booking_id: int,
     body: ArrivalUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_staff),
+    current_user: User = Depends(require_staff),
 ):
-    return mark_arrival(db, booking_id, body.arrived)
+    return mark_arrival(db, booking_id, body.arrived, current_user)
 
 
 @router.patch(
@@ -162,9 +168,9 @@ def update_consultation_hint(
     booking_id: int,
     body: ConsultationHintUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_staff),
+    current_user: User = Depends(require_staff),
 ):
-    return set_consultation_hint(db, booking_id, body.dismissed)
+    return set_consultation_hint(db, booking_id, body.dismissed, current_user)
 
 
 @router.patch(
@@ -176,23 +182,23 @@ def update_extra_charge(
     booking_id: int,
     body: ExtraChargeUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_staff),
+    current_user: User = Depends(require_staff),
 ):
-    return set_extra_charge(db, booking_id, body)
+    return set_extra_charge(db, booking_id, body, current_user)
 
 
 @router.patch(
     "/{booking_id}/medical-record",
     response_model=BookingResponse,
-    summary="Save the clinical record (diagnosis, prescription, …) for a visit (staff)",
+    summary="Save the clinical record (diagnosis, prescription, …) for a visit (admin)",
 )
 def update_medical_record(
     booking_id: int,
     body: MedicalRecordUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_staff),
+    current_user: User = Depends(require_admin),
 ):
-    return set_medical_record(db, booking_id, body)
+    return set_medical_record(db, booking_id, body, current_user)
 
 
 @router.post(

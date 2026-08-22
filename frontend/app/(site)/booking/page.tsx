@@ -25,21 +25,24 @@ import {
   BookingConfirmation,
   ClinicSchedule,
   PaymentMethod,
+  PublicBranch,
   QueueStatus,
   confirmOnlinePayment,
   getAvailability,
   getClinicSchedule,
   getQueueStatus,
+  listPublicBranches,
   submitBooking,
 } from "@/lib/api";
 
-type Step = "date" | "details" | "payment" | "online" | "confirmed";
+type Step = "branch" | "date" | "details" | "payment" | "online" | "confirmed";
 
 type Fields = {
   fullName: string;
   phone: string;
   email: string;
   treatment: string;
+  branchId: string;
   message: string;
 };
 
@@ -48,6 +51,7 @@ const EMPTY_FIELDS: Fields = {
   phone: "",
   email: "",
   treatment: "",
+  branchId: "",
   message: "",
 };
 
@@ -92,14 +96,16 @@ function formatTimeRange(start: string | null | undefined, end: string | null | 
 export default function BookingPage() {
   const { t, locale } = useLanguage();
   const STEPS: { id: Step; label: string }[] = [
+    { id: "branch", label: t("site.booking.stepBranch") },
     { id: "date", label: t("site.booking.stepDate") },
     { id: "details", label: t("site.booking.stepDetails") },
     { id: "payment", label: t("site.booking.stepPayment") },
     { id: "confirmed", label: t("site.booking.stepConfirmed") },
   ];
-  const [step, setStep] = useState<Step>("date");
+  const [step, setStep] = useState<Step>("branch");
 
   const [schedule, setSchedule] = useState<ClinicSchedule | null>(null);
+  const [branches, setBranches] = useState<PublicBranch[]>([]);
   const [date, setDate] = useState("");
   const [availability, setAvailability] = useState<Availability | null>(null);
   const [checkingAvailability, setCheckingAvailability] = useState(false);
@@ -121,12 +127,26 @@ export default function BookingPage() {
   const successRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    getClinicSchedule()
-      .then(setSchedule)
+    listPublicBranches()
+      .then((list) => {
+        setBranches(list);
+        // No branches configured yet — skip the branch step entirely.
+        if (list.length === 0) setStep((s) => (s === "branch" ? "date" : s));
+      })
       .catch(() => {
-        /* schedule is a nice-to-have for min/max bounds — availability check still validates server-side */
+        /* booking still works without a branch */
       });
   }, []);
+
+  // Refetch whenever the selected branch changes so working days/hours (and
+  // the min/max bounds below) reflect that branch — schedule is a
+  // nice-to-have for min/max bounds either way; availability still
+  // validates server-side.
+  useEffect(() => {
+    getClinicSchedule(fields.branchId ? Number(fields.branchId) : undefined)
+      .then(setSchedule)
+      .catch(() => {});
+  }, [fields.branchId]);
 
   useEffect(() => {
     if (step === "confirmed" && successRef.current) successRef.current.focus();
@@ -156,6 +176,22 @@ export default function BookingPage() {
     };
   }, [step, confirmation]);
 
+  const selectedBranch = useMemo(
+    () => branches.find((b) => String(b.id) === fields.branchId) ?? null,
+    [branches, fields.branchId],
+  );
+
+  // The branch's own fee (exam or, for a consultation, its consultation
+  // price) takes over from the clinic-wide default once one is selected.
+  const amountToPay = useMemo(() => {
+    if (selectedBranch) {
+      const branchFee =
+        fields.treatment === CONSULTATION_SERVICE ? selectedBranch.consultation_price : selectedBranch.consultation_fee;
+      if (branchFee != null) return branchFee;
+    }
+    return schedule?.consultation_fee ?? 0;
+  }, [selectedBranch, fields.treatment, schedule]);
+
   const maxDate = useMemo(() => {
     if (!schedule) return undefined;
     const d = new Date();
@@ -170,7 +206,7 @@ export default function BookingPage() {
     if (!value) return;
     setCheckingAvailability(true);
     try {
-      const av = await getAvailability(value);
+      const av = await getAvailability(value, fields.branchId ? Number(fields.branchId) : undefined);
       setAvailability(av);
       if (!av.is_working_day || av.reason) {
         setDateError(av.reason || t("site.booking.dateNotAvailable"));
@@ -185,6 +221,14 @@ export default function BookingPage() {
   const goToDetails = () => {
     if (!date || !availability || dateError || availability.next_queue_number === null) return;
     setStep("details");
+  };
+
+  const goToDate = () => {
+    if (branches.length > 0 && !fields.branchId) {
+      setErrors((e) => ({ ...e, branchId: t("site.booking.branchRequired") }));
+      return;
+    }
+    setStep("date");
   };
 
   const set = (key: keyof Fields) => (
@@ -227,6 +271,7 @@ export default function BookingPage() {
         date,
         message: fields.message || undefined,
         payment_method: paymentMethod,
+        branch_id: fields.branchId ? Number(fields.branchId) : undefined,
       });
       setConfirmation(result);
       setStep(paymentMethod === "online" ? "online" : "confirmed");
@@ -253,7 +298,7 @@ export default function BookingPage() {
   };
 
   const resetFlow = () => {
-    setStep("date");
+    setStep(branches.length > 0 ? "branch" : "date");
     setDate("");
     setAvailability(null);
     setFields(EMPTY_FIELDS);
@@ -326,6 +371,57 @@ export default function BookingPage() {
           </ol>
 
           <div className="mt-10 rounded-2xl border border-ink/10 bg-white/70 p-6 shadow-[0_20px_50px_-20px_rgba(16,24,32,0.15)] backdrop-blur-md sm:p-10">
+            {/* ── STEP 0: BRANCH ───────────────────────────────────────────── */}
+            {step === "branch" && (
+              <div className="space-y-6">
+                <div>
+                  <p className={labelBase}>
+                    {t("site.booking.branchLabel")} <span className="text-gold">*</span>
+                  </p>
+                  <div className="mt-2 grid gap-4 sm:grid-cols-2">
+                    {branches.map((b) => (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => {
+                          setFields((f) => ({ ...f, branchId: String(b.id) }));
+                          setErrors((prev) => (prev.branchId ? { ...prev, branchId: undefined } : prev));
+                        }}
+                        className={`rounded-xl border p-5 text-left transition-all ${
+                          fields.branchId === String(b.id)
+                            ? "border-gold bg-gold/10 ring-2 ring-gold/25"
+                            : "border-ink/15 bg-white/50 hover:border-ink/30"
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span
+                            className={`flex h-4 w-4 items-center justify-center rounded-full border-2 ${
+                              fields.branchId === String(b.id) ? "border-gold" : "border-ink/30"
+                            }`}
+                          >
+                            {fields.branchId === String(b.id) && <span className="h-2 w-2 rounded-full bg-gold" />}
+                          </span>
+                          <span className="font-serif text-base font-medium text-ink">{b.name}</span>
+                        </span>
+                        {b.address && <span className="mt-2 block text-xs leading-relaxed text-ink/55">{b.address}</span>}
+                      </button>
+                    ))}
+                  </div>
+                  {err("branchId")}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={goToDate}
+                  disabled={!fields.branchId}
+                  className="group inline-flex items-center justify-center gap-2 self-start rounded-full bg-ink px-8 py-4 text-xs font-medium uppercase tracking-[0.2em] text-cream transition-all duration-300 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {t("site.booking.continue")}
+                  <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
+                </button>
+              </div>
+            )}
+
             {/* ── STEP 1: DATE ─────────────────────────────────────────────── */}
             {step === "date" && (
               <div className="space-y-6">
@@ -384,15 +480,26 @@ export default function BookingPage() {
                   </div>
                 )}
 
-                <button
-                  type="button"
-                  onClick={goToDetails}
-                  disabled={!availability || !!dateError || checkingAvailability}
-                  className="group inline-flex items-center justify-center gap-2 self-start rounded-full bg-ink px-8 py-4 text-xs font-medium uppercase tracking-[0.2em] text-cream transition-all duration-300 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {t("site.booking.continue")}
-                  <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
-                </button>
+                <div className="flex items-center gap-3">
+                  {branches.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setStep("branch")}
+                      className="inline-flex items-center gap-2 rounded-full border border-ink/15 px-6 py-3.5 text-xs font-medium uppercase tracking-[0.2em] text-ink/70 transition-colors hover:text-ink"
+                    >
+                      <ArrowLeft className="h-4 w-4" /> {t("site.booking.back")}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={goToDetails}
+                    disabled={!availability || !!dateError || checkingAvailability}
+                    className="group inline-flex items-center justify-center gap-2 self-start rounded-full bg-ink px-8 py-4 text-xs font-medium uppercase tracking-[0.2em] text-cream transition-all duration-300 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {t("site.booking.continue")}
+                    <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
+                  </button>
+                </div>
               </div>
             )}
 
@@ -489,6 +596,27 @@ export default function BookingPage() {
                   )}
                 </div>
 
+                {selectedBranch && (
+                  <div className="rounded-xl border border-gold/30 bg-gold/10 p-4 space-y-1.5">
+                    {fields.treatment !== CONSULTATION_SERVICE && selectedBranch.consultation_fee != null && (
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-ink/60">{t("site.booking.consultationFeeLabel")}</span>
+                        <span className="font-serif font-medium text-ink">
+                          {selectedBranch.consultation_fee.toLocaleString("en-US")} {schedule?.currency ?? "EGP"}
+                        </span>
+                      </div>
+                    )}
+                    {fields.treatment === CONSULTATION_SERVICE && selectedBranch.consultation_price != null && (
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-ink/60">{t("site.booking.consultationPriceLabel")}</span>
+                        <span className="font-serif font-medium text-ink">
+                          {selectedBranch.consultation_price.toLocaleString("en-US")} {schedule?.currency ?? "EGP"}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div>
                   <label htmlFor="message" className={labelBase}>
                     {t("site.booking.message")} <span className="text-ink/35">{t("site.booking.optional")}</span>
@@ -525,19 +653,21 @@ export default function BookingPage() {
             {/* ── STEP 3: PAYMENT METHOD ──────────────────────────────────────── */}
             {step === "payment" && (
               <div className="space-y-6">
-                {schedule && schedule.consultation_fee > 0 && (
+                {amountToPay > 0 && (
                   <div className="flex items-center justify-between gap-4 rounded-xl border border-gold/30 bg-gold/10 p-5">
                     <div>
                       <p className="text-[0.68rem] font-medium uppercase tracking-[0.2em] text-ink/50">
                         {t("site.booking.amountToPay")}
                       </p>
                       <p className="mt-1 font-serif text-3xl font-medium text-ink">
-                        {schedule.consultation_fee.toLocaleString("en-US")}{" "}
-                        <span className="text-lg text-ink/60">{schedule.currency}</span>
+                        {amountToPay.toLocaleString("en-US")}{" "}
+                        <span className="text-lg text-ink/60">{schedule?.currency ?? "EGP"}</span>
                       </p>
                     </div>
                     <span className="shrink-0 rounded-full bg-ink/5 px-3 py-1 text-[0.65rem] font-medium text-ink/60">
-                      {t("site.booking.consultationFeeLabel")}
+                      {fields.treatment === CONSULTATION_SERVICE
+                        ? t("site.booking.consultationPriceLabel")
+                        : t("site.booking.consultationFeeLabel")}
                     </span>
                   </div>
                 )}
@@ -696,10 +826,20 @@ export default function BookingPage() {
                   </div>
                   {confirmation.consultation_fee != null && confirmation.consultation_fee > 0 && (
                     <div>
-                      <span className="block text-[0.62rem] uppercase tracking-wider text-ink/40">{t("site.booking.consultationFeeLabel")}</span>
+                      <span className="block text-[0.62rem] uppercase tracking-wider text-ink/40">
+                        {confirmation.service_type === "consultation"
+                          ? t("site.booking.consultationPriceLabel")
+                          : t("site.booking.consultationFeeLabel")}
+                      </span>
                       <span className="font-serif text-base font-medium text-ink">
                         {confirmation.consultation_fee.toLocaleString("en-US")} {schedule?.currency ?? "EGP"}
                       </span>
+                    </div>
+                  )}
+                  {confirmation.branch_name && (
+                    <div>
+                      <span className="block text-[0.62rem] uppercase tracking-wider text-ink/40">{t("site.booking.branchLabel")}</span>
+                      <span className="font-serif text-base font-medium text-ink">{confirmation.branch_name}</span>
                     </div>
                   )}
                   <div>
