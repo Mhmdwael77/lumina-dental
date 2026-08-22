@@ -55,12 +55,15 @@ class BranchResponse(BaseModel):
 
 class PublicBranchResponse(BaseModel):
     """What a patient sees while booking — just enough to pick a branch and
-    see its price, none of the staff-management details."""
+    see its price and schedule, none of the staff-management details.
+    working_hours is always the *effective* schedule (falls back to the
+    clinic-wide default if this branch hasn't set its own), never null."""
     id: int
     name: str
     address: str | None = None
     consultation_fee: float | None = None
     consultation_price: float | None = None
+    working_hours: WorkingHours
 
     model_config = {"from_attributes": True}
 

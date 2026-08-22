@@ -128,6 +128,9 @@ export interface PublicBranch {
   address?: string | null;
   consultation_fee?: number | null;
   consultation_price?: number | null;
+  /** Always the effective schedule (falls back to the clinic-wide default
+   * if this branch hasn't set its own), never null. */
+  working_hours: WorkingHours;
 }
 
 /** A structured API error the UI can show directly to the user. */

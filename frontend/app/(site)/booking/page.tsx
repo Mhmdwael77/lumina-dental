@@ -24,9 +24,11 @@ import {
   Availability,
   BookingConfirmation,
   ClinicSchedule,
+  DayHours,
   PaymentMethod,
   PublicBranch,
   QueueStatus,
+  WorkingHours,
   confirmOnlinePayment,
   getAvailability,
   getClinicSchedule,
@@ -55,9 +57,72 @@ const EMPTY_FIELDS: Fields = {
   message: "",
 };
 
+// Booking values must stay the exact English strings the backend validates
+// against (VALID_TREATMENTS) and that already-stored bookings use — only the
+// label shown to the patient gets translated.
+const TREATMENT_LABEL_KEYS: Record<string, string> = {
+  [CONSULTATION_SERVICE]: "treatmentConsultation",
+  "Cosmetic Dentistry": "treatmentCosmetic",
+  "Dental Implants": "treatmentImplants",
+  "Teeth Whitening": "treatmentWhitening",
+  "Orthodontics": "treatmentOrthodontics",
+  "General Dentistry": "treatmentGeneral",
+  "Pediatric Dentistry": "treatmentPediatric",
+};
+
 const inputBase =
   "w-full rounded-xl border bg-white/60 px-4 py-3 text-ink outline-none transition-colors duration-200 placeholder:text-ink/35 focus:border-gold focus:ring-2 focus:ring-gold/25";
 const labelBase = "mb-2 block text-xs font-medium uppercase tracking-[0.15em] text-ink/60";
+
+// Saturday-first — matches how the clinic's own week reads (open Sat–Thu).
+const DAY_ORDER: (keyof WorkingHours)[] = ["saturday", "sunday", "monday", "tuesday", "wednesday", "thursday", "friday"];
+
+function sameHours(a: DayHours | null, b: DayHours | null) {
+  if (a === null && b === null) return true;
+  if (!a || !b) return false;
+  return a.opens === b.opens && a.closes === b.closes;
+}
+
+/** "14:30" -> "2:30 PM" / "2:30 م" — so hours read clearly as morning or
+ * evening instead of an easy-to-misread 24-hour value. */
+function formatHourMinute(hhmm: string, locale: "en" | "ar") {
+  const [h, m] = hhmm.split(":").map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return hhmm;
+  const d = new Date(2000, 0, 1, h, m);
+  return d.toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+/** Groups consecutive days sharing identical hours into one line each, e.g.
+ * ["Sat–Thu: 10:00 AM–9:00 PM", "Fri: Closed"] instead of one line per day. */
+function formatBranchHours(
+  wh: WorkingHours,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+  locale: "en" | "ar"
+): string[] {
+  const groups: { days: (keyof WorkingHours)[]; hours: DayHours | null }[] = [];
+  for (const day of DAY_ORDER) {
+    const hours = wh[day] ?? null;
+    const last = groups[groups.length - 1];
+    if (last && sameHours(last.hours, hours)) {
+      last.days.push(day);
+    } else {
+      groups.push({ days: [day], hours });
+    }
+  }
+  return groups.map((g) => {
+    const first = t(`site.booking.days.${g.days[0]}`);
+    const last = t(`site.booking.days.${g.days[g.days.length - 1]}`);
+    const dayLabel = g.days.length === 1 ? first : `${first}–${last}`;
+    const hoursLabel = g.hours
+      ? `${formatHourMinute(g.hours.opens, locale)}–${formatHourMinute(g.hours.closes, locale)}`
+      : t("site.booking.closedDay");
+    return `${dayLabel}: ${hoursLabel}`;
+  });
+}
 
 function todayIso() {
   return new Date().toISOString().split("T")[0];
@@ -95,6 +160,10 @@ function formatTimeRange(start: string | null | undefined, end: string | null | 
 
 export default function BookingPage() {
   const { t, locale } = useLanguage();
+  const treatmentLabel = (opt: string) => {
+    const key = TREATMENT_LABEL_KEYS[opt];
+    return key ? t(`site.booking.${key}`) : opt;
+  };
   const STEPS: { id: Step; label: string }[] = [
     { id: "branch", label: t("site.booking.stepBranch") },
     { id: "date", label: t("site.booking.stepDate") },
@@ -110,6 +179,7 @@ export default function BookingPage() {
   const [availability, setAvailability] = useState<Availability | null>(null);
   const [checkingAvailability, setCheckingAvailability] = useState(false);
   const [dateError, setDateError] = useState("");
+  const dateCheckId = useRef(0);
 
   const [fields, setFields] = useState<Fields>(EMPTY_FIELDS);
   const [errors, setErrors] = useState<Partial<Record<keyof Fields, string>>>({});
@@ -146,6 +216,21 @@ export default function BookingPage() {
     getClinicSchedule(fields.branchId ? Number(fields.branchId) : undefined)
       .then(setSchedule)
       .catch(() => {});
+  }, [fields.branchId]);
+
+  // A date picked for one branch isn't necessarily valid for another (they
+  // can have different working days/hours) — clear it whenever the branch
+  // changes (e.g. the patient goes back and switches branches) so a stale
+  // "available" date from the previous branch can't slip through.
+  const isFirstBranchRender = useRef(true);
+  useEffect(() => {
+    if (isFirstBranchRender.current) {
+      isFirstBranchRender.current = false;
+      return;
+    }
+    setDate("");
+    setAvailability(null);
+    setDateError("");
   }, [fields.branchId]);
 
   useEffect(() => {
@@ -204,22 +289,29 @@ export default function BookingPage() {
     setDateError("");
     setAvailability(null);
     if (!value) return;
+    // If the patient changes the date again (or goes back and forth) before
+    // this check comes back, an older, slower response landing after a newer
+    // one would otherwise overwrite it with stale availability for a date
+    // that's no longer selected — guard against that here.
+    const requestId = ++dateCheckId.current;
     setCheckingAvailability(true);
     try {
       const av = await getAvailability(value, fields.branchId ? Number(fields.branchId) : undefined);
+      if (requestId !== dateCheckId.current) return;
       setAvailability(av);
       if (!av.is_working_day || av.reason) {
         setDateError(av.reason || t("site.booking.dateNotAvailable"));
       }
     } catch (err) {
+      if (requestId !== dateCheckId.current) return;
       setDateError(err instanceof ApiError ? err.message : t("site.booking.availabilityCheckError"));
     } finally {
-      setCheckingAvailability(false);
+      if (requestId === dateCheckId.current) setCheckingAvailability(false);
     }
   };
 
   const goToDetails = () => {
-    if (!date || !availability || dateError || availability.next_queue_number === null) return;
+    if (!date || !availability || dateError || availability.date !== date || availability.next_queue_number === null) return;
     setStep("details");
   };
 
@@ -404,6 +496,14 @@ export default function BookingPage() {
                           <span className="font-serif text-base font-medium text-ink">{b.name}</span>
                         </span>
                         {b.address && <span className="mt-2 block text-xs leading-relaxed text-ink/55">{b.address}</span>}
+                        <span className="mt-3 flex flex-col gap-1 border-t border-ink/10 pt-3 text-[0.7rem] text-ink/55">
+                          {formatBranchHours(b.working_hours, t, locale).map((line) => (
+                            <span key={line} className="flex items-center gap-1.5">
+                              <Clock className="h-3 w-3 shrink-0 text-gold" />
+                              {line}
+                            </span>
+                          ))}
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -475,7 +575,10 @@ export default function BookingPage() {
                     </div>
                     <p className="mt-4 flex items-start gap-1.5 text-xs text-ink/50">
                       <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      {t("site.booking.openHours", { opens: availability.opens ?? "", closes: availability.closes ?? "" })}
+                      {t("site.booking.openHours", {
+                        opens: availability.opens ? formatHourMinute(availability.opens, locale) : "",
+                        closes: availability.closes ? formatHourMinute(availability.closes, locale) : "",
+                      })}
                     </p>
                   </div>
                 )}
@@ -493,7 +596,7 @@ export default function BookingPage() {
                   <button
                     type="button"
                     onClick={goToDetails}
-                    disabled={!availability || !!dateError || checkingAvailability}
+                    disabled={!availability || !!dateError || checkingAvailability || availability?.date !== date}
                     className="group inline-flex items-center justify-center gap-2 self-start rounded-full bg-ink px-8 py-4 text-xs font-medium uppercase tracking-[0.2em] text-cream transition-all duration-300 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {t("site.booking.continue")}
@@ -570,7 +673,7 @@ export default function BookingPage() {
                     </option>
                     {SERVICE_OPTIONS.map((opt) => (
                       <option key={opt} value={opt} className="text-ink">
-                        {opt}
+                        {treatmentLabel(opt)}
                       </option>
                     ))}
                   </select>
@@ -818,7 +921,7 @@ export default function BookingPage() {
                   </div>
                   <div>
                     <span className="block text-[0.62rem] uppercase tracking-wider text-ink/40">{t("site.booking.service2")}</span>
-                    <span className="font-serif text-base font-medium text-ink">{confirmation.treatment}</span>
+                    <span className="font-serif text-base font-medium text-ink">{treatmentLabel(confirmation.treatment)}</span>
                   </div>
                   <div>
                     <span className="block text-[0.62rem] uppercase tracking-wider text-ink/40">{t("site.booking.queueNumber")}</span>

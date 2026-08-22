@@ -680,21 +680,26 @@ export function ClinicSettings({ token, onAuthError }: { token: string; onAuthEr
                           </span>
                         </label>
                         {d.enabled ? (
-                          // Forced LTR: a time range ("opens – closes") should always read
-                          // left-to-right in chronological order, even on an RTL page —
-                          // otherwise flexbox mirrors the two inputs and it reads backwards.
-                          <div dir="ltr" className="flex items-center gap-1 flex-1">
+                          // The row itself follows the page's natural direction (labels
+                          // read "من ... إلى ..." right-to-left in Arabic), but each time
+                          // input is individually forced dir="ltr" so its HH:MM/AM-PM
+                          // segments never mirror — only the row layout should flip, not
+                          // the numbers themselves.
+                          <div className="flex items-center gap-1 flex-1">
+                            <span className="text-[0.62rem] text-[#101820]/40 shrink-0">{t("admin.branches.fromLabel")}</span>
                             <input
                               type="time"
+                              dir="ltr"
                               value={d.opens}
                               onChange={(e) =>
                                 setHoursDraft((h) => ({ ...h, [day]: { ...h[day], opens: e.target.value } }))
                               }
                               className="flex-1 min-w-0 bg-[#f4f1eb]/60 border border-[#101820]/15 rounded-lg px-1.5 py-0.5 text-[0.7rem] text-[#101820] outline-none focus:border-[#b99a6b] focus:bg-white"
                             />
-                            <span className="text-[#101820]/30 text-[0.7rem] shrink-0">–</span>
+                            <span className="text-[0.62rem] text-[#101820]/40 shrink-0">{t("admin.branches.toLabel")}</span>
                             <input
                               type="time"
+                              dir="ltr"
                               value={d.closes}
                               onChange={(e) =>
                                 setHoursDraft((h) => ({ ...h, [day]: { ...h[day], closes: e.target.value } }))

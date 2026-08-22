@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
 from core.database import Branch, User
+from core.clinic_schedule import branch_working_hours, hours_by_day_json
 from core.crud.branch import (
     get_branch,
     get_all_branches,
@@ -63,9 +64,16 @@ def list_branches(db: Session) -> list[BranchResponse]:
 
 def list_public_branches(db: Session) -> list[PublicBranchResponse]:
     """Active branches for the public booking form — no auth required, so
-    only the fields a patient needs to pick one and see its price."""
+    only the fields a patient needs to pick one and see its price/schedule."""
     return [
-        PublicBranchResponse.model_validate(b)
+        PublicBranchResponse(
+            id=b.id,
+            name=b.name,
+            address=b.address,
+            consultation_fee=b.consultation_fee,
+            consultation_price=b.consultation_price,
+            working_hours=hours_by_day_json(branch_working_hours(b)),
+        )
         for b in get_all_branches(db)
         if b.is_active
     ]
